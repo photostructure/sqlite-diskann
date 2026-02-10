@@ -34,7 +34,7 @@ SQLITE_SOURCE = vendor/sqlite/sqlite3.c
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     EXTENSION = diskann.dylib
-    LDFLAGS += -dynamiclib
+    LDFLAGS += -dynamiclib -undefined dynamic_lookup
 endif
 ifeq ($(UNAME_S),Linux)
     EXTENSION = diskann.so
