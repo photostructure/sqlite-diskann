@@ -1,6 +1,6 @@
 {
   "name": "@photostructure/sqlite-diskann",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SQLite extension for DiskANN approximate nearest neighbor vector search",
   "homepage": "https://github.com/photostructure/sqlite-diskann",
   "type": "module",
