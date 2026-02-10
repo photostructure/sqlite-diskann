@@ -12,8 +12,8 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
 - [x] Test-First Development
 - [x] Implementation
 - [x] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Cleanup & Documentation
+- [x] Final Review
 
 ## Required Reading
 

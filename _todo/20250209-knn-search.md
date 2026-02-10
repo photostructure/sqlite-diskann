@@ -9,7 +9,7 @@ the shared beam search used by both search AND insert.
 
 ## Current Phase
 
-- [ ] Research & Planning
+- [x] Research & Planning
 - [ ] Test Design
 - [ ] Implementation Design
 - [ ] Test-First Development
@@ -40,7 +40,8 @@ the shared beam search used by both search AND insert.
 - **Constraints:** Must use standalone types from `20250209-shared-graph-types.md`
   (DiskAnnNode, DiskAnnSearchCtx, distance functions, nodeBin* helpers). Must use
   existing BlobSpot layer for BLOB I/O. Search is read-only — uses
-  `DISKANN_BLOB_READONLY` mode with a single reusable BlobSpot.
+  `is_writable=0` mode with a single reusable BlobSpot. All vector data is `float*`
+  (not libSQL's `Vector*` type) since we are float32-only.
 - **Success Criteria:**
   - `diskann_search()` returns correct k-NN results on small test datasets
   - Results match brute-force reference for known vectors
@@ -60,11 +61,15 @@ the shared beam search used by both search AND insert.
 6. Maintain separate top-K list with exact distances (from node vectors, not edge vectors)
 7. Stop when no unvisited candidates remain
 
-**READONLY vs WRITABLE blob mode:**
-- Search uses READONLY: single `BlobSpot` reused via `blob_spot_reload()` for each
+**Read-only vs writable blob mode:**
+- Search uses `is_writable=0`: single `BlobSpot` reused via `blob_spot_reload()` for each
   candidate. Memory-efficient — only one BLOB buffer alive at a time.
-- Insert uses WRITABLE: separate `BlobSpot` per visited node (needs to write edges later).
-- This is controlled by `blobMode` field in `DiskAnnSearchCtx`.
+- Insert uses `is_writable=1`: separate `BlobSpot` per visited node (needs to write edges later).
+- This is controlled by `blob_mode` field in `DiskAnnSearchCtx`.
+- The original libSQL code used `DISKANN_BLOB_READONLY` / `DISKANN_BLOB_WRITABLE` constants
+  from internal headers. Our extracted `blob_spot_create()` in `diskann_blob.h` uses a plain
+  `int is_writable` parameter (0 or 1). We should define constants in `diskann_node.h` for
+  clarity: `#define DISKANN_BLOB_READONLY 0` / `#define DISKANN_BLOB_WRITABLE 1`.
 
 **Approximate vs exact distance:**
 - Edge vectors may be compressed (lower precision than node vectors)
@@ -72,23 +77,52 @@ the shared beam search used by both search AND insert.
 - Top-K list uses exact distance (from full node vectors) — accurate results
 - For float32-only (no compression), these are identical
 
-**Random start node:** `diskAnnSelectRandomShadowRow()` picks a random row using
-`SELECT rowid FROM shadow ORDER BY RANDOM() LIMIT 1`. This is O(n) in SQLite.
-Consider caching or storing a medoid entry point in metadata for large indexes.
+**Random start node:** `diskAnnSelectRandomShadowRow()` picks a random row using:
+```sql
+SELECT rowid FROM shadow LIMIT 1 OFFSET ABS(RANDOM()) % MAX((SELECT COUNT(*) FROM shadow), 1)
+```
+This avoids `ORDER BY RANDOM()` (which sorts the whole table) but is still O(n) due to the
+`COUNT(*)` subquery plus the OFFSET scan. Consider caching or storing a medoid entry point
+in metadata for large indexes.
 
 **Empty index:** If shadow table has zero rows, search returns 0 results (not an error).
 First check with `diskAnnSelectRandomShadowRow()` which returns `SQLITE_DONE` if empty.
 
 **Search context memory management:**
-- `aCandidates` and `aDistances` are parallel arrays, allocated to `maxCandidates` size
-- `aTopCandidates` and `aTopDistances` are parallel arrays, allocated to `maxTopCandidates`
+- `aCandidates` and `aDistances` are parallel `float` arrays, allocated to `maxCandidates` size
+  - **Bug in original:** libSQL allocates these with `sizeof(double)` but uses as `float*`.
+    Our extraction must use `sizeof(float)` consistently.
+- `aTopCandidates` and `aTopDistances` are parallel `float` arrays, allocated to `maxTopCandidates`
+  - Same `sizeof(double)` bug applies here.
+- `aCandidates` contains BOTH visited and unvisited candidates (not just unvisited).
+  Visited candidates remain in the array but are skipped by `find_closest_unvisited()`.
+  The deinit function only frees unvisited candidates from the array (visited ones are
+  freed via the `visitedList`).
 - `visitedList` is a singly-linked list of DiskAnnNode pointers
 - Context owns all nodes put into it (frees them in deinit)
 - Candidates array is sorted by distance — binary-ish insertion via `distanceBufferInsertIdx`
 
-**Zombie edge handling:** If a node has been deleted, `blob_spot_create()` returns
-`DISKANN_ERROR_NOTFOUND`. `diskAnnSearchInternal` must handle this gracefully — skip
-the candidate and continue. This is how delete's "conservative no-repair" strategy works.
+**Zombie edge handling:** If a node has been deleted, `blob_spot_reload()` returns
+`DISKANN_ROW_NOT_FOUND`. `diskann_search_internal` must handle this gracefully — delete
+the candidate from the queue (via `diskann_search_ctx_delete_candidate()`) and continue.
+This is how delete's "conservative no-repair" strategy works.
+
+**Bug in original `diskAnnSearchInternal` (line 1413):** The `out:` label always returns
+`SQLITE_OK`, even when `rc` was set to an error (NOMEM, blob failure, etc.). The `goto out`
+paths set `rc` but the return ignores it. Our extracted version MUST fix this: `return rc;`.
+
+**`diskAnnSearchCtxShouldAddCandidate` unused parameter:** The original takes
+`const DiskAnnIndex *pIndex` but never uses it. Our extracted version should drop this
+parameter.
+
+**Float32 simplification:** The original code uses libSQL's `Vector*` type throughout.
+`nodeBinVector()` returns a `Vector*`, `diskAnnVectorDistance()` takes `Vector*`, and
+`VectorPair` holds separate node/edge vector representations for compression support.
+In our float32-only extraction: `node_bin_vector()` returns `float*` (zero-copy pointer
+into BLOB buffer), `diskann_distance()` takes `float*`, and `VectorPair` is eliminated
+entirely (node and edge vectors are the same type). The `query.pNode != query.pEdge`
+check (line 1366) is always false for float32-only, so the exact-distance recalculation
+branch can be omitted.
 
 ## Solutions
 
@@ -104,20 +138,32 @@ the candidate and continue. This is how delete's "conservative no-repair" strate
 
 ## Tasks
 
-- [ ] Study `diskAnnSearchInternal()` algorithm (lines 1283-1414) in detail
-- [ ] Study search context management functions (lines 990-1167)
-- [ ] Implement `diskAnnSelectRandomShadowRow()` equivalent:
+- [x] Study `diskAnnSearchInternal()` algorithm (lines 1283-1414) in detail
+- [x] Study search context management functions (lines 990-1167)
+- [ ] Define blob mode constants in `src/diskann_node.h`:
+  - `#define DISKANN_BLOB_READONLY 0`
+  - `#define DISKANN_BLOB_WRITABLE 1`
+- [ ] Implement `diskann_select_random_shadow_row()` equivalent:
   - Simplified: single-key (rowid), not multi-key
-  - SQL: `SELECT rowid FROM "{db}".{idx}_shadow ORDER BY RANDOM() LIMIT 1`
+  - SQL: `SELECT rowid FROM "{db}".{idx}_shadow LIMIT 1 OFFSET ABS(RANDOM()) %% MAX((SELECT COUNT(*) FROM "{db}".{idx}_shadow), 1)`
+  - Returns `SQLITE_DONE` if table is empty, `SQLITE_OK` with rowid if found
 - [ ] Implement search context in `src/diskann_search.c`:
   - `diskann_search_ctx_init()` / `diskann_search_ctx_deinit()`
-  - `diskann_search_ctx_is_visited()` / `diskann_search_ctx_mark_visited()`
-  - `diskann_search_ctx_should_add_candidate()` / `diskann_search_ctx_insert_candidate()`
+  - `diskann_search_ctx_is_visited()` / `diskann_search_ctx_has_candidate()`
+  - `diskann_search_ctx_mark_visited()`
+  - `diskann_search_ctx_should_add_candidate()` (drop unused `pIndex` param from original)
+  - `diskann_search_ctx_insert_candidate()`
+  - `diskann_search_ctx_delete_candidate()` (needed for zombie edge handling)
+  - `diskann_search_ctx_has_unvisited()`
+  - `diskann_search_ctx_get_candidate()`
   - `diskann_search_ctx_find_closest_unvisited()`
 - [ ] Implement `diskann_search_internal()` — core beam search:
-  - Lazy BLOB loading (READONLY: reuse single BlobSpot)
-  - Handle DISKANN_ERROR_NOTFOUND gracefully (zombie edges)
+  - Lazy BLOB loading (is_writable=0: reuse single BlobSpot)
+  - Handle DISKANN_ROW_NOT_FOUND gracefully (zombie edges → delete candidate)
   - Populate top-K results with exact distances
+  - **Fix original bug:** `return rc` not `return SQLITE_OK` in cleanup path
+  - Float32 simplification: skip `pNode != pEdge` recalculation branch (always same)
+  - Use `float*` from `node_bin_vector()`, not libSQL `Vector*`
 - [ ] Implement `diskann_search()` — public API wrapper:
   - Validate inputs (NULL checks, dimension mismatch)
   - Get random start node
