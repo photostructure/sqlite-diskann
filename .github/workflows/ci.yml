@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release: bump version (current = use package.json)"
+        required: false
+        type: choice
+        default: "current"
+        options:
+          - current
+          - patch
+          - minor
+          - major
+
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Release - {0}', github.event.inputs.version) || '' }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# TODO: Add Windows jobs when Makefile gains Windows/MSVC support
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: sudo apt-get update && sudo apt-get install -y bear clang-tidy
+      - name: Generate compilation database
+        run: make bear
+      - name: Run clang-tidy
+        run: make lint
+
+  test-linux-x64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Build and run tests
+        run: make test
+      - name: Stage prebuild
+        run: |
+          mkdir -p prebuilds/linux-x64
+          cp build/diskann.so prebuilds/linux-x64/
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: prebuilds-linux-x64
+          path: prebuilds/
+
+  test-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Build and run tests
+        run: make test
+      - name: Stage prebuild
+        run: |
+          mkdir -p prebuilds/linux-arm64
+          cp build/diskann.so prebuilds/linux-arm64/
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: prebuilds-linux-arm64
+          path: prebuilds/
+
+  # Apple Silicon (default arch for macos-14 runners)
+  test-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Build and run tests
+        run: make test
+      - name: Stage prebuild
+        run: |
+          mkdir -p prebuilds/darwin-arm64
+          cp build/diskann.dylib prebuilds/darwin-arm64/
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: prebuilds-darwin-arm64
+          path: prebuilds/
+
+  # Intel macOS (deprecated Fall 2027)
+  test-macos-x64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Build and run tests
+        run: make test
+      - name: Stage prebuild
+        run: |
+          mkdir -p prebuilds/darwin-x64
+          cp build/diskann.dylib prebuilds/darwin-x64/
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: prebuilds-darwin-x64
+          path: prebuilds/
+
+  test-typescript:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Lint TypeScript
+        run: npx eslint
+      - name: Run TypeScript tests
+        run: npx vitest run
+
+  publish:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    needs:
+      - lint
+      - test-linux-x64
+      - test-linux-arm64
+      - test-macos-arm64
+      - test-macos-x64
+      - test-typescript
+    permissions:
+      id-token: write # Required for OIDC trusted publishing to npm
+      contents: write # Required for creating tags/releases
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: ./prebuilds
+          merge-multiple: true
+
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: lts/*
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: photostructure/git-ssh-signing-action@fdd4b062a9ba41473f013258cc9c7eea1640f826 # v1.2.0
+        with:
+          ssh-signing-key: ${{ secrets.SSH_SIGNING_KEY }}
+          git-user-name: ${{ secrets.GIT_USER_NAME }}
+          git-user-email: ${{ secrets.GIT_USER_EMAIL }}
+
+      - run: ls -laR ./prebuilds
+
+      # Upgrade npm to support OIDC trusted publishing (requires npm >= 11.5.1)
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - name: Bump version (if requested)
+        if: ${{ github.event.inputs.version != 'current' }}
+        run: |
+          npm version ${{ github.event.inputs.version }} -m "release: %s" --sign-git-tag
+
+      - name: Get version
+        id: version
+        run: echo "version=v$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Push changes
+        run: git push origin main --follow-tags
+
+      - name: Create GitHub release
+        run: gh release create ${{ steps.version.outputs.version }} --generate-notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
