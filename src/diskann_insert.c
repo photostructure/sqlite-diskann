@@ -164,7 +164,7 @@ static int insert_shadow_row(DiskAnnIndex *idx, int64_t id) {
 
 int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
                    uint32_t dims) {
-  DiskAnnSearchCtx ctx;
+  DiskAnnSearchCtx ctx = {0};
   BlobSpot *new_blob = NULL;
   char *savepoint_sql = NULL;
   uint64_t start_rowid = 0;
