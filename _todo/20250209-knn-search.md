@@ -10,11 +10,11 @@ the shared beam search used by both search AND insert.
 ## Current Phase
 
 - [x] Research & Planning
-- [ ] Test Design
-- [ ] Implementation Design
-- [ ] Test-First Development
-- [ ] Implementation
-- [ ] Integration
+- [x] Test Design
+- [x] Implementation Design
+- [x] Test-First Development
+- [x] Implementation
+- [x] Integration
 - [ ] Cleanup & Documentation
 - [ ] Final Review
 
@@ -68,8 +68,9 @@ the shared beam search used by both search AND insert.
 - This is controlled by `blob_mode` field in `DiskAnnSearchCtx`.
 - The original libSQL code used `DISKANN_BLOB_READONLY` / `DISKANN_BLOB_WRITABLE` constants
   from internal headers. Our extracted `blob_spot_create()` in `diskann_blob.h` uses a plain
-  `int is_writable` parameter (0 or 1). We should define constants in `diskann_node.h` for
-  clarity: `#define DISKANN_BLOB_READONLY 0` / `#define DISKANN_BLOB_WRITABLE 1`.
+  `int is_writable` parameter (0 or 1). Define constants in `diskann_blob.h` (natural home
+  since they name the values passed to `blob_spot_create`):
+  `#define DISKANN_BLOB_READONLY 0` / `#define DISKANN_BLOB_WRITABLE 1`.
 
 **Approximate vs exact distance:**
 - Edge vectors may be compressed (lower precision than node vectors)
@@ -136,49 +137,110 @@ branch can be omitted.
 **Cons:** `diskann_api.c` would grow huge, mixes lifecycle + algorithm code
 **Status:** Rejected
 
+## Implementation Design
+
+### Files changed (5)
+
+1. **`src/diskann_blob.h`** — Add `DISKANN_BLOB_READONLY 0` / `DISKANN_BLOB_WRITABLE 1`
+2. **`src/diskann_search.h`** (NEW) — `DiskAnnSearchCtx` struct + 4 exposed function decls
+3. **`src/diskann_search.c`** (NEW) — 9 static helpers + 4 exposed funcs + `diskann_search()`
+4. **`src/diskann_api.c`** — Delete `diskann_search()` stub (lines 455-468)
+5. **`Makefile`** — Add `diskann_search.c` to SOURCES
+
+### `DiskAnnSearchCtx` struct (in `diskann_search.h`)
+
+Simplified from original (no VectorPair, float-only, query is borrowed not owned):
+```c
+typedef struct DiskAnnSearchCtx {
+  const float *query;              /* borrowed, not owned */
+  DiskAnnNode **candidates;        /* sorted by distance ascending */
+  float *distances;                /* parallel to candidates */
+  unsigned int n_candidates;
+  unsigned int max_candidates;     /* = searchL or insertL */
+  DiskAnnNode **top_candidates;    /* top-K exact results */
+  float *top_distances;
+  int n_top_candidates;
+  int max_top_candidates;          /* = k */
+  DiskAnnNode *visited_list;       /* linked list of visited nodes */
+  unsigned int n_unvisited;
+  int blob_mode;                   /* DISKANN_BLOB_READONLY or WRITABLE */
+} DiskAnnSearchCtx;
+```
+
+### Function visibility
+
+**Exposed via `diskann_search.h`** (4 — needed by future insert):
+- `diskann_search_ctx_init()` / `diskann_search_ctx_deinit()`
+- `diskann_select_random_shadow_row()`
+- `diskann_search_internal()`
+
+**Static in `diskann_search.c`** (9 — internal to beam search):
+- `search_ctx_is_visited`, `search_ctx_has_candidate`
+- `search_ctx_should_add` — delegates to `distance_buffer_insert_idx()` from `diskann_node.h` (DRY)
+- `search_ctx_mark_visited`, `search_ctx_has_unvisited`
+- `search_ctx_get_candidate`, `search_ctx_delete_candidate`
+- `search_ctx_insert_candidate`, `search_ctx_find_closest_unvisited`
+
+**Public (declared in `diskann.h`, defined in `diskann_search.c`):**
+- `diskann_search()` — replaces stub in `diskann_api.c`
+
+### Key design decisions
+
+- **Query is borrowed `const float*`** — VectorPair eliminated, no alloc/dealloc needed
+- **Static helpers reuse `buffer_insert`/`buffer_delete`/`distance_buffer_insert_idx`** from
+  `diskann_node.h` — avoids duplicating sorted array logic
+- **READONLY mode reuses a single BlobSpot** via `blob_spot_reload()` — matches original
+- **Error messages removed** — original used `char **pzErrMsg`, our API uses return codes only;
+  caller can use `sqlite3_errmsg(db)` if needed
+- **`SQLITE_DONE` for empty table** — `diskann_select_random_shadow_row()` returns SQLITE_DONE
+  (101, positive) for empty index; `diskann_search()` checks this explicitly and returns 0
+
 ## Tasks
 
 - [x] Study `diskAnnSearchInternal()` algorithm (lines 1283-1414) in detail
 - [x] Study search context management functions (lines 990-1167)
-- [ ] Define blob mode constants in `src/diskann_node.h`:
+- [x] Define blob mode constants in `src/diskann_blob.h` (before `blob_spot_create` decl):
   - `#define DISKANN_BLOB_READONLY 0`
   - `#define DISKANN_BLOB_WRITABLE 1`
-- [ ] Implement `diskann_select_random_shadow_row()` equivalent:
+- [x] Implement `diskann_select_random_shadow_row()` equivalent:
   - Simplified: single-key (rowid), not multi-key
   - SQL: `SELECT rowid FROM "{db}".{idx}_shadow LIMIT 1 OFFSET ABS(RANDOM()) %% MAX((SELECT COUNT(*) FROM "{db}".{idx}_shadow), 1)`
-  - Returns `SQLITE_DONE` if table is empty, `SQLITE_OK` with rowid if found
-- [ ] Implement search context in `src/diskann_search.c`:
+  - Returns `SQLITE_DONE` if table is empty, `DISKANN_OK` with rowid if found
+- [x] Implement search context in `src/diskann_search.c`:
   - `diskann_search_ctx_init()` / `diskann_search_ctx_deinit()`
-  - `diskann_search_ctx_is_visited()` / `diskann_search_ctx_has_candidate()`
-  - `diskann_search_ctx_mark_visited()`
-  - `diskann_search_ctx_should_add_candidate()` (drop unused `pIndex` param from original)
-  - `diskann_search_ctx_insert_candidate()`
-  - `diskann_search_ctx_delete_candidate()` (needed for zombie edge handling)
-  - `diskann_search_ctx_has_unvisited()`
-  - `diskann_search_ctx_get_candidate()`
-  - `diskann_search_ctx_find_closest_unvisited()`
-- [ ] Implement `diskann_search_internal()` — core beam search:
+  - `search_ctx_is_visited()` / `search_ctx_has_candidate()` (static)
+  - `search_ctx_mark_visited()` (static)
+  - `search_ctx_should_add()` (static, dropped unused pIndex param)
+  - `search_ctx_insert_candidate()` (static)
+  - `search_ctx_delete_candidate()` (static, zombie edge handling)
+  - `search_ctx_has_unvisited()` (static)
+  - `search_ctx_get_candidate()` (static)
+  - `search_ctx_find_closest_unvisited()` (static)
+- [x] Implement `diskann_search_internal()` — core beam search:
   - Lazy BLOB loading (is_writable=0: reuse single BlobSpot)
   - Handle DISKANN_ROW_NOT_FOUND gracefully (zombie edges → delete candidate)
   - Populate top-K results with exact distances
-  - **Fix original bug:** `return rc` not `return SQLITE_OK` in cleanup path
-  - Float32 simplification: skip `pNode != pEdge` recalculation branch (always same)
-  - Use `float*` from `node_bin_vector()`, not libSQL `Vector*`
-- [ ] Implement `diskann_search()` — public API wrapper:
-  - Validate inputs (NULL checks, dimension mismatch)
-  - Get random start node
-  - Run search_internal
-  - Copy top-K results to caller's DiskAnnResult array
-  - Return count of results found
-- [ ] Write tests in `tests/c/test_search.c`:
-  - Search empty index → 0 results
-  - Search with NULL/invalid args → error codes
-  - Search 1-vector index → returns that vector
-  - Search known 10-vector dataset → correct nearest neighbor
-  - Search with k > n → returns n results
-  - Brute-force comparison on 100-vector random dataset
-- [ ] Expose `diskann_search_internal()` via `src/diskann_internal.h` for future insert use
-- [ ] Wire into Makefile and test_runner.c
+  - **Fixed original bug:** `return rc` not `return SQLITE_OK` in cleanup path
+  - Float32 simplification: skipped `pNode != pEdge` recalculation branch
+  - Uses `const float*` from `node_bin_vector()`, not libSQL `Vector*`
+- [x] Implement `diskann_search()` — public API wrapper:
+  - Validates inputs (NULL checks, dimension mismatch)
+  - Gets random start node
+  - Runs search_internal
+  - Copies top-K results to caller's DiskAnnResult array
+  - Returns count of results found
+- [x] Write tests in `tests/c/test_search.c` (18 tests, all compile, 15 failing as expected):
+  - Validation: NULL index/query/results, dimension mismatch, negative k, zero k
+  - Empty index → 0 results
+  - Single vector: exact match, different query, k > n
+  - 4-node fully-connected graph: exact match, nearest neighbor, sorted results,
+    k < n, k > n, readonly (no writes)
+  - 50-vector recall test: brute-force comparison, recall ≥ 80%
+  - Cosine metric: verify cosine distance works
+- [x] Wire into Makefile and test_runner.c (auto-picked up by wildcard)
+- [x] Create `src/diskann_search.h` with DiskAnnSearchCtx struct + exposed function decls
+- [x] Add `diskann_search.c` to SOURCES in Makefile
+- [x] Delete `diskann_search()` stub from `src/diskann_api.c`
 
 **Verification:**
 ```bash
@@ -187,13 +249,51 @@ make asan      # No memory errors
 make valgrind  # No leaks
 ```
 
+## Session Notes (2025-02-09, Implementation phase)
+
+**Implementation was straightforward.** The extraction from `diskann.c` went cleanly because
+all dependencies (DiskAnnNode, BlobSpot, distance functions, buffer helpers) were already
+extracted in earlier TPPs. The entire implementation compiled on the first try with all
+111 tests passing, ASan and Valgrind clean.
+
+**Struct field naming:** The TPP design spec used `unsigned int` for `n_candidates` and
+`n_unvisited`, but the implementation uses `int` throughout to match the signatures of
+`buffer_insert`/`buffer_delete`/`distance_buffer_insert_idx` (which all take `int` params).
+This avoids sign-conversion warnings with `-Wconversion`. The `DiskAnnSearchCtx` in the
+header reflects the actual implementation, not the design spec.
+
+**`diskann_select_random_shadow_row` return values:** Uses `SQLITE_DONE` (101, positive)
+for empty table — same as original. This is a SQLite convention, not a DISKANN error code.
+`diskann_search()` checks for this explicitly before initializing the search context.
+
+**All 18 search tests pass:** validation (6), empty index (1), single-vector (3),
+known-graph (6), brute-force recall (1), cosine metric (1). The recall test uses 50 vectors
+with a ring-connected graph (each node → next 8 nodes), query = (0.5, 0.5, 0.5), and
+achieves ≥80% recall@5.
+
+**`ctx_initialized` flag in `diskann_search()`:** Added to avoid double-deinit if
+`diskann_search_internal` fails. In practice, `deinit` is always safe to call after
+`init` succeeds, so this is belt-and-suspenders.
+
 ## Notes
 
-**Blocked by:** `20250209-shared-graph-types.md` (needs DiskAnnNode, DiskAnnSearchCtx,
-distance functions, nodeBin* helpers)
+**Blocked by:** ~~`20250209-shared-graph-types.md`~~ ✅ Complete — all dependencies available
 
 **Blocks:** Future insert TPP (insert calls `diskann_search_internal()`)
 
-**To populate test data:** Tests need to manually insert BLOBs into the shadow table
-using the nodeBin* functions from the shared types TPP. Can't use `diskann_insert()`
-since it doesn't exist yet. Write a test helper that constructs node BLOBs directly.
+**For insert TPP:** `diskann_search_internal` is exposed via `diskann_search.h` with
+`DISKANN_BLOB_WRITABLE` mode. Insert will need to:
+1. Call `diskann_search_ctx_init` with `DISKANN_BLOB_WRITABLE` and `insertL` beam width
+2. Call `diskann_search_internal` to find nearest neighbors
+3. Access `ctx.visited_list` to get visited nodes (which have loaded writable BlobSpots)
+4. Use those BlobSpots to add edges to neighbors
+
+**Integration phase (next):** The search function is already wired into the public API
+(`diskann.h` declares it, `diskann_search.c` defines it, `Makefile` compiles it, stub
+removed from `diskann_api.c`). Integration may be a no-op or quick verification that the
+module boundary is clean. Consider whether `diskann_search.h` should be included anywhere
+else (e.g., will future insert code need it?).
+
+**Cleanup phase:** Consider removing the `ctx_initialized` flag — it's redundant since
+`diskann_search_ctx_deinit` is always called after `init` succeeds. Also review whether
+any dead code in `diskann.c` can be flagged for removal now that search is extracted.

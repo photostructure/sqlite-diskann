@@ -110,6 +110,36 @@ extern void test_node_free_null(void);
 /* DiskAnnIndex derived fields tests */
 extern void test_open_index_computes_derived_fields(void);
 
+/* Search tests — validation */
+extern void test_search_null_index(void);
+extern void test_search_null_query(void);
+extern void test_search_null_results(void);
+extern void test_search_dimension_mismatch(void);
+extern void test_search_negative_k(void);
+extern void test_search_zero_k(void);
+
+/* Search tests — empty index */
+extern void test_search_empty_index(void);
+
+/* Search tests — single vector */
+extern void test_search_single_vector_exact(void);
+extern void test_search_single_vector_different_query(void);
+extern void test_search_single_vector_k_larger(void);
+
+/* Search tests — known graph (4-node fully-connected) */
+extern void test_search_known_graph_exact_match(void);
+extern void test_search_known_graph_nearest(void);
+extern void test_search_known_graph_sorted_results(void);
+extern void test_search_known_graph_k_less_than_n(void);
+extern void test_search_known_graph_k_greater_than_n(void);
+extern void test_search_readonly_no_writes(void);
+
+/* Search tests — brute-force recall */
+extern void test_search_brute_force_recall(void);
+
+/* Search tests — cosine metric */
+extern void test_search_cosine_metric(void);
+
 /* Delete tests */
 extern void test_delete_null_index(void);
 extern void test_delete_from_empty_index(void);
@@ -243,6 +273,36 @@ int main(void) {
 
     /* DiskAnnIndex derived fields tests */
     RUN_TEST(test_open_index_computes_derived_fields);
+
+    /* Search tests — validation */
+    RUN_TEST(test_search_null_index);
+    RUN_TEST(test_search_null_query);
+    RUN_TEST(test_search_null_results);
+    RUN_TEST(test_search_dimension_mismatch);
+    RUN_TEST(test_search_negative_k);
+    RUN_TEST(test_search_zero_k);
+
+    /* Search tests — empty index */
+    RUN_TEST(test_search_empty_index);
+
+    /* Search tests — single vector */
+    RUN_TEST(test_search_single_vector_exact);
+    RUN_TEST(test_search_single_vector_different_query);
+    RUN_TEST(test_search_single_vector_k_larger);
+
+    /* Search tests — known graph (4-node fully-connected) */
+    RUN_TEST(test_search_known_graph_exact_match);
+    RUN_TEST(test_search_known_graph_nearest);
+    RUN_TEST(test_search_known_graph_sorted_results);
+    RUN_TEST(test_search_known_graph_k_less_than_n);
+    RUN_TEST(test_search_known_graph_k_greater_than_n);
+    RUN_TEST(test_search_readonly_no_writes);
+
+    /* Search tests — brute-force recall */
+    RUN_TEST(test_search_brute_force_recall);
+
+    /* Search tests — cosine metric */
+    RUN_TEST(test_search_cosine_metric);
 
     /* Delete tests */
     RUN_TEST(test_delete_null_index);

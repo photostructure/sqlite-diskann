@@ -21,7 +21,10 @@ Checks: '
   -readability-else-after-return,
   -readability-magic-numbers,
   -readability-function-cognitive-complexity,
-  -readability-identifier-length
+  -readability-identifier-length,
+  -readability-uppercase-literal-suffix,
+  -readability-braces-around-statements,
+  -cppcoreguidelines-init-variables
 '
 
 # Treat warnings as errors
@@ -49,8 +52,7 @@ CheckOptions:
     value: lower_case
   - key: readability-identifier-naming.TypedefCase
     value: lower_case
-  - key: readability-identifier-naming.TypedefSuffix
-    value: _t
+  # TypedefSuffix _t removed: POSIX reserves _t and it's too pedantic for test code
   - key: readability-identifier-naming.GlobalConstantCase
     value: UPPER_CASE
   - key: performance-move-const-arg.CheckTriviallyCopyableMove

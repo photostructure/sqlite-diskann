@@ -42,6 +42,12 @@ typedef struct BlobSpot {
 } BlobSpot;
 
 /*
+** BLOB access modes (values passed to blob_spot_create is_writable parameter)
+*/
+#define DISKANN_BLOB_READONLY  0
+#define DISKANN_BLOB_WRITABLE  1
+
+/*
 ** Error codes specific to BLOB operations
 */
 #define DISKANN_ROW_NOT_FOUND -100  /* Row doesn't exist in shadow table */

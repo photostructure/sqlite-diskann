@@ -463,21 +463,6 @@ int diskann_insert(
   return DISKANN_ERROR; /* Not implemented yet */
 }
 
-int diskann_search(
-  DiskAnnIndex *idx,
-  const float *query,
-  uint32_t dims,
-  int k,
-  DiskAnnResult *results
-) {
-  (void)idx;
-  (void)query;
-  (void)dims;
-  (void)k;
-  (void)results;
-  return DISKANN_ERROR; /* Not implemented yet */
-}
-
 /*
 ** Delete a vector from the index.
 **
@@ -514,7 +499,7 @@ int diskann_delete(
   if (rc != SQLITE_OK) return DISKANN_ERROR;
 
   /* Open read-only BlobSpot for target node */
-  rc = blob_spot_create(idx, &target_blob, (uint64_t)id, idx->block_size, 0);
+  rc = blob_spot_create(idx, &target_blob, (uint64_t)id, idx->block_size, DISKANN_BLOB_READONLY);
   if (rc == DISKANN_ROW_NOT_FOUND) {
     rc = DISKANN_ERROR_NOTFOUND;
     goto rollback;
@@ -530,7 +515,7 @@ int diskann_delete(
 
   if (n_edges > 0) {
     /* Create writable BlobSpot (initial rowid = target, which exists) */
-    rc = blob_spot_create(idx, &edge_blob, (uint64_t)id, idx->block_size, 1);
+    rc = blob_spot_create(idx, &edge_blob, (uint64_t)id, idx->block_size, DISKANN_BLOB_WRITABLE);
     if (rc != DISKANN_OK) goto rollback;
 
     for (uint16_t i = 0; i < n_edges; i++) {

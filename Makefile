@@ -25,7 +25,7 @@ TEST_BIN = test_diskann
 
 # Source files
 # Note: diskann.c is the original libSQL code still being extracted - not included yet
-SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_node.c
+SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c
 TEST_C_SOURCES = $(filter-out %/test_runner.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
