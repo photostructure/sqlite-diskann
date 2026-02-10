@@ -66,15 +66,15 @@ static void search_ctx_mark_visited(DiskAnnSearchCtx *ctx, DiskAnnNode *node,
   node->next = ctx->visited_list;
   ctx->visited_list = node;
 
-  int insert_idx = distance_buffer_insert_idx(
-      ctx->top_distances, ctx->n_top_candidates, ctx->max_top_candidates,
-      distance);
+  int insert_idx =
+      distance_buffer_insert_idx(ctx->top_distances, ctx->n_top_candidates,
+                                 ctx->max_top_candidates, distance);
   if (insert_idx < 0) {
     return;
   }
   buffer_insert((uint8_t *)ctx->top_candidates, ctx->n_top_candidates,
-                ctx->max_top_candidates, insert_idx,
-                (int)sizeof(DiskAnnNode *), (const uint8_t *)&node, NULL);
+                ctx->max_top_candidates, insert_idx, (int)sizeof(DiskAnnNode *),
+                (const uint8_t *)&node, NULL);
   buffer_insert((uint8_t *)ctx->top_distances, ctx->n_top_candidates,
                 ctx->max_top_candidates, insert_idx, (int)sizeof(float),
                 (const uint8_t *)&distance, NULL);
@@ -166,8 +166,8 @@ int diskann_search_ctx_init(DiskAnnSearchCtx *ctx, const float *query,
   ctx->blob_mode = blob_mode;
 
   ctx->distances = (float *)sqlite3_malloc(max_candidates * (int)sizeof(float));
-  ctx->candidates =
-      (DiskAnnNode **)sqlite3_malloc(max_candidates * (int)sizeof(DiskAnnNode *));
+  ctx->candidates = (DiskAnnNode **)sqlite3_malloc(max_candidates *
+                                                   (int)sizeof(DiskAnnNode *));
   ctx->top_distances = (float *)sqlite3_malloc(max_top * (int)sizeof(float));
   ctx->top_candidates =
       (DiskAnnNode **)sqlite3_malloc(max_top * (int)sizeof(DiskAnnNode *));
@@ -178,10 +178,14 @@ int diskann_search_ctx_init(DiskAnnSearchCtx *ctx, const float *query,
   }
 
   /* Allocation failure — clean up partial allocations */
-  if (ctx->distances) sqlite3_free(ctx->distances);
-  if (ctx->candidates) sqlite3_free(ctx->candidates);
-  if (ctx->top_distances) sqlite3_free(ctx->top_distances);
-  if (ctx->top_candidates) sqlite3_free(ctx->top_candidates);
+  if (ctx->distances)
+    sqlite3_free(ctx->distances);
+  if (ctx->candidates)
+    sqlite3_free(ctx->candidates);
+  if (ctx->top_distances)
+    sqlite3_free(ctx->top_distances);
+  if (ctx->top_candidates)
+    sqlite3_free(ctx->top_candidates);
   ctx->distances = NULL;
   ctx->candidates = NULL;
   ctx->top_distances = NULL;
@@ -335,8 +339,8 @@ int diskann_search_internal(DiskAnnIndex *idx, DiskAnnSearchCtx *ctx,
         continue;
       }
 
-      float edge_distance =
-          diskann_distance(ctx->query, edge_vector, idx->dimensions, idx->metric);
+      float edge_distance = diskann_distance(ctx->query, edge_vector,
+                                             idx->dimensions, idx->metric);
       int insert_idx = search_ctx_should_add(ctx, edge_distance);
       if (insert_idx < 0) {
         continue;
@@ -375,12 +379,18 @@ int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
   int rc;
 
   /* Validate inputs */
-  if (!idx) return DISKANN_ERROR_INVALID;
-  if (!query) return DISKANN_ERROR_INVALID;
-  if (!results) return DISKANN_ERROR_INVALID;
-  if (k < 0) return DISKANN_ERROR_INVALID;
-  if (dims != idx->dimensions) return DISKANN_ERROR_DIMENSION;
-  if (k == 0) return 0;
+  if (!idx)
+    return DISKANN_ERROR_INVALID;
+  if (!query)
+    return DISKANN_ERROR_INVALID;
+  if (!results)
+    return DISKANN_ERROR_INVALID;
+  if (k < 0)
+    return DISKANN_ERROR_INVALID;
+  if (dims != idx->dimensions)
+    return DISKANN_ERROR_DIMENSION;
+  if (k == 0)
+    return 0;
 
   /* Find a random start node */
   rc = diskann_select_random_shadow_row(idx, &start_rowid);

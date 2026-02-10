@@ -48,23 +48,13 @@ AllowAllParametersOfDeclarationOnNextLine: true
 BinPackArguments: true
 BinPackParameters: true
 
-# Includes
-SortIncludes: true
-IncludeBlocks: Regroup
-IncludeCategories:
-  # System headers
-  - Regex: '^<.*\.h>'
-    Priority: 1
-  # SQLite headers
-  - Regex: '^<sqlite3.*\.h>'
-    Priority: 2
-  # Project headers
-  - Regex: '^".*"'
-    Priority: 3
+# Includes — preserve existing order to avoid noisy diffs
+SortIncludes: Never
+IncludeBlocks: Preserve
 
 # Misc
 AllowShortFunctionsOnASingleLine: None
-AllowShortIfStatementsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLoopsOnASingleLine: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1

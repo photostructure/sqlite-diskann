@@ -9,9 +9,9 @@
 #include "diskann_blob.h"
 #include "diskann.h"
 #include "diskann_internal.h"
+#include <assert.h>
 #include <sqlite3.h>
 #include <string.h>
-#include <assert.h>
 
 /*
 ** Convert SQLite error codes to DiskANN error codes.
@@ -33,13 +33,8 @@ static int convert_sqlite_error(DiskAnnIndex *idx, int rc) {
   return DISKANN_ERROR;
 }
 
-int blob_spot_create(
-  DiskAnnIndex *idx,
-  BlobSpot **out,
-  uint64_t rowid,
-  uint32_t buffer_size,
-  int is_writable
-) {
+int blob_spot_create(DiskAnnIndex *idx, BlobSpot **out, uint64_t rowid,
+                     uint32_t buffer_size, int is_writable) {
   BlobSpot *spot = NULL;
   uint8_t *buffer = NULL;
   int rc = DISKANN_OK;
@@ -71,15 +66,9 @@ int blob_spot_create(
   }
 
   /* Open BLOB handle - do this last so we don't need to close on error */
-  int sqlite_rc = sqlite3_blob_open(
-    idx->db,
-    idx->db_name,
-    idx->shadow_name,
-    "data",
-    (sqlite3_int64)rowid,
-    is_writable,
-    &spot->pBlob
-  );
+  int sqlite_rc =
+      sqlite3_blob_open(idx->db, idx->db_name, idx->shadow_name, "data",
+                        (sqlite3_int64)rowid, is_writable, &spot->pBlob);
 
   rc = convert_sqlite_error(idx, sqlite_rc);
   if (rc != DISKANN_OK) {
@@ -109,12 +98,8 @@ cleanup:
   return rc;
 }
 
-int blob_spot_reload(
-  DiskAnnIndex *idx,
-  BlobSpot *spot,
-  uint64_t rowid,
-  uint32_t buffer_size
-) {
+int blob_spot_reload(DiskAnnIndex *idx, BlobSpot *spot, uint64_t rowid,
+                     uint32_t buffer_size) {
   int rc;
 
   /* Validate inputs */
@@ -141,15 +126,9 @@ int blob_spot_reload(
     }
 
     /* Reopen BLOB */
-    int sqlite_rc = sqlite3_blob_open(
-      idx->db,
-      idx->db_name,
-      idx->shadow_name,
-      "data",
-      (sqlite3_int64)rowid,
-      spot->is_writable,
-      &spot->pBlob
-    );
+    int sqlite_rc = sqlite3_blob_open(idx->db, idx->db_name, idx->shadow_name,
+                                      "data", (sqlite3_int64)rowid,
+                                      spot->is_writable, &spot->pBlob);
 
     rc = convert_sqlite_error(idx, sqlite_rc);
     if (rc != DISKANN_OK) {
@@ -177,11 +156,8 @@ int blob_spot_reload(
   }
 
   /* Read BLOB data into buffer */
-  int sqlite_rc = sqlite3_blob_read(
-    spot->pBlob,
-    spot->buffer,
-    (int)buffer_size,
-    0  /* offset */
+  int sqlite_rc = sqlite3_blob_read(spot->pBlob, spot->buffer, (int)buffer_size,
+                                    0 /* offset */
   );
 
   if (sqlite_rc != SQLITE_OK) {
@@ -204,17 +180,15 @@ int blob_spot_flush(DiskAnnIndex *idx, BlobSpot *spot) {
   if (!spot->is_writable) {
     return DISKANN_ERROR_INVALID;
   }
-  /* Ensure buffer is initialized before writing (prevents writing uninitialized memory) */
+  /* Ensure buffer is initialized before writing (prevents writing uninitialized
+   * memory) */
   if (!spot->is_initialized) {
     return DISKANN_ERROR_INVALID;
   }
 
   /* Write buffer to BLOB */
-  int sqlite_rc = sqlite3_blob_write(
-    spot->pBlob,
-    spot->buffer,
-    (int)spot->buffer_size,
-    0  /* offset */
+  int sqlite_rc = sqlite3_blob_write(spot->pBlob, spot->buffer,
+                                     (int)spot->buffer_size, 0 /* offset */
   );
 
   if (sqlite_rc != SQLITE_OK) {

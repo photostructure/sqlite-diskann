@@ -25,7 +25,7 @@ TEST_BIN = test_diskann
 
 # Source files
 # Note: diskann.c is the original libSQL code still being extracted - not included yet
-SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c
+SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c
 TEST_C_SOURCES = $(filter-out %/test_runner.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
@@ -90,7 +90,9 @@ asan:
 # Generate compile_commands.json for clang-tidy
 bear:
 	@command -v bear >/dev/null 2>&1 || { echo "Error: bear not installed. Install with: sudo apt install bear" >&2; exit 1; }
-	bear -- $(MAKE) clean all test
+	bear -- $(MAKE) clean all test || true
+	@# Strip .o linker inputs that Bear captures (clang-tidy only compiles)
+	@python3 -c "import json;cc=json.load(open('compile_commands.json'));[e.__setitem__('arguments',[a for a in e['arguments'] if not a.endswith('.o')]) for e in cc];json.dump(cc,open('compile_commands.json','w'),indent=2)"
 
 # Run clang-tidy (requires compile_commands.json from bear)
 clang-tidy:

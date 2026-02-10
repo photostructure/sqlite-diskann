@@ -36,18 +36,18 @@ extern "C" {
 ** - Unvisited candidates in the candidates array are also freed in deinit
 */
 typedef struct DiskAnnSearchCtx {
-  const float *query;              /* borrowed, not owned */
-  DiskAnnNode **candidates;        /* sorted by distance ascending */
-  float *distances;                /* parallel to candidates */
+  const float *query;       /* borrowed, not owned */
+  DiskAnnNode **candidates; /* sorted by distance ascending */
+  float *distances;         /* parallel to candidates */
   int n_candidates;
-  int max_candidates;              /* = searchL or insertL */
-  DiskAnnNode **top_candidates;    /* top-K exact results */
+  int max_candidates;           /* = searchL or insertL */
+  DiskAnnNode **top_candidates; /* top-K exact results */
   float *top_distances;
   int n_top_candidates;
-  int max_top_candidates;          /* = k */
-  DiskAnnNode *visited_list;       /* linked list of visited nodes */
+  int max_top_candidates;    /* = k */
+  DiskAnnNode *visited_list; /* linked list of visited nodes */
   int n_unvisited;
-  int blob_mode;                   /* DISKANN_BLOB_READONLY or WRITABLE */
+  int blob_mode; /* DISKANN_BLOB_READONLY or WRITABLE */
 } DiskAnnSearchCtx;
 
 /*

@@ -10,11 +10,11 @@
 #include "diskann_blob.h"
 #include "diskann_internal.h"
 #include "diskann_node.h"
+#include <assert.h>
 #include <stddef.h>
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
+#include <string.h>
 
 /* Default configuration values */
 #define DEFAULT_DIMENSIONS 768
@@ -27,7 +27,7 @@
 
 /* Maximum allowed values */
 #define MAX_DIMENSIONS 16384
-#define MAX_BLOCK_SIZE 134217728  /* 128MB */
+#define MAX_BLOCK_SIZE 134217728 /* 128MB */
 #define MAX_IDENTIFIER_LEN 64
 
 /*
@@ -36,14 +36,16 @@
 ** Returns 1 if valid, 0 if invalid.
 */
 static int validate_identifier(const char *name) {
-  if (!name || !name[0]) return 0;
+  if (!name || !name[0])
+    return 0;
   char c = name[0];
   if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_')) {
     return 0;
   }
   size_t len = 1;
   for (const char *p = name + 1; *p; p++, len++) {
-    if (len > MAX_IDENTIFIER_LEN) return 0;
+    if (len > MAX_IDENTIFIER_LEN)
+      return 0;
     c = *p;
     if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
           (c >= '0' && c <= '9') || c == '_')) {
@@ -57,24 +59,21 @@ static int validate_identifier(const char *name) {
 ** Store a single metadata key-value pair as a SQLite INTEGER.
 ** Portable across platforms (no endianness issues).
 */
-static int store_metadata_int(
-  sqlite3 *db,
-  const char *db_name,
-  const char *index_name,
-  const char *key,
-  int64_t value
-) {
+static int store_metadata_int(sqlite3 *db, const char *db_name,
+                              const char *index_name, const char *key,
+                              int64_t value) {
   /* index_name validated by caller (all callers run validate_identifier) */
   char *sql = sqlite3_mprintf(
-    "INSERT OR REPLACE INTO \"%w\".%s_metadata (key, value) VALUES (?1, ?2)",
-    db_name, index_name
-  );
-  if (!sql) return DISKANN_ERROR_NOMEM;
+      "INSERT OR REPLACE INTO \"%w\".%s_metadata (key, value) VALUES (?1, ?2)",
+      db_name, index_name);
+  if (!sql)
+    return DISKANN_ERROR_NOMEM;
 
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   sqlite3_free(sql);
-  if (rc != SQLITE_OK) return DISKANN_ERROR;
+  if (rc != SQLITE_OK)
+    return DISKANN_ERROR;
 
   sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
   sqlite3_bind_int64(stmt, 2, value);
@@ -89,34 +88,27 @@ static int store_metadata_int(
 ** Check if a shadow table already exists for the given index.
 ** Returns 1 if exists, 0 if not, -1 on error.
 */
-static int shadow_table_exists(
-  sqlite3 *db,
-  const char *db_name,
-  const char *index_name
-) {
-  char *sql = sqlite3_mprintf(
-    "SELECT name FROM \"%w\".sqlite_master "
-    "WHERE type='table' AND name='%s_shadow'",
-    db_name, index_name
-  );
-  if (!sql) return -1;
+static int shadow_table_exists(sqlite3 *db, const char *db_name,
+                               const char *index_name) {
+  char *sql = sqlite3_mprintf("SELECT name FROM \"%w\".sqlite_master "
+                              "WHERE type='table' AND name='%s_shadow'",
+                              db_name, index_name);
+  if (!sql)
+    return -1;
 
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   sqlite3_free(sql);
-  if (rc != SQLITE_OK) return -1;
+  if (rc != SQLITE_OK)
+    return -1;
 
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
   return (rc == SQLITE_ROW) ? 1 : 0;
 }
 
-int diskann_create_index(
-  sqlite3 *db,
-  const char *db_name,
-  const char *index_name,
-  const DiskAnnConfig *config
-) {
+int diskann_create_index(sqlite3 *db, const char *db_name,
+                         const char *index_name, const DiskAnnConfig *config) {
   char *sql = NULL;
   char *err_msg = NULL;
   int rc;
@@ -130,14 +122,12 @@ int diskann_create_index(
   }
 
   /* Apply defaults if config is NULL */
-  DiskAnnConfig default_config = {
-    .dimensions = DEFAULT_DIMENSIONS,
-    .metric = DEFAULT_METRIC,
-    .max_neighbors = DEFAULT_MAX_NEIGHBORS,
-    .search_list_size = DEFAULT_SEARCH_LIST_SIZE,
-    .insert_list_size = DEFAULT_INSERT_LIST_SIZE,
-    .block_size = DEFAULT_BLOCK_SIZE
-  };
+  DiskAnnConfig default_config = {.dimensions = DEFAULT_DIMENSIONS,
+                                  .metric = DEFAULT_METRIC,
+                                  .max_neighbors = DEFAULT_MAX_NEIGHBORS,
+                                  .search_list_size = DEFAULT_SEARCH_LIST_SIZE,
+                                  .insert_list_size = DEFAULT_INSERT_LIST_SIZE,
+                                  .block_size = DEFAULT_BLOCK_SIZE};
 
   if (!config) {
     config = &default_config;
@@ -154,28 +144,30 @@ int diskann_create_index(
 
   /* Fail if index already exists (don't silently overwrite config) */
   rc = shadow_table_exists(db, db_name, index_name);
-  if (rc < 0) return DISKANN_ERROR;
-  if (rc == 1) return DISKANN_ERROR_EXISTS;
+  if (rc < 0)
+    return DISKANN_ERROR;
+  if (rc == 1)
+    return DISKANN_ERROR_EXISTS;
 
   /* Wrap everything in a SAVEPOINT for atomicity */
   sql = sqlite3_mprintf("SAVEPOINT diskann_create_%s", index_name);
-  if (!sql) return DISKANN_ERROR_NOMEM;
+  if (!sql)
+    return DISKANN_ERROR_NOMEM;
   rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
   sqlite3_free(sql);
   if (rc != SQLITE_OK) {
-    if (err_msg) sqlite3_free(err_msg);
+    if (err_msg)
+      sqlite3_free(err_msg);
     return DISKANN_ERROR;
   }
 
-  /* Create shadow table: {index_name}_shadow (id INTEGER PRIMARY KEY, data BLOB) */
-  sql = sqlite3_mprintf(
-    "CREATE TABLE \"%w\".%s_shadow ("
-    "  id INTEGER PRIMARY KEY,"
-    "  data BLOB NOT NULL"
-    ")",
-    db_name,
-    index_name
-  );
+  /* Create shadow table: {index_name}_shadow (id INTEGER PRIMARY KEY, data
+   * BLOB) */
+  sql = sqlite3_mprintf("CREATE TABLE \"%w\".%s_shadow ("
+                        "  id INTEGER PRIMARY KEY,"
+                        "  data BLOB NOT NULL"
+                        ")",
+                        db_name, index_name);
 
   if (!sql) {
     rc = DISKANN_ERROR_NOMEM;
@@ -186,20 +178,18 @@ int diskann_create_index(
   sqlite3_free(sql);
 
   if (rc != SQLITE_OK) {
-    if (err_msg) sqlite3_free(err_msg);
+    if (err_msg)
+      sqlite3_free(err_msg);
     rc = DISKANN_ERROR;
     goto rollback;
   }
 
   /* Create metadata table: {index_name}_metadata (key TEXT, value INTEGER) */
-  sql = sqlite3_mprintf(
-    "CREATE TABLE \"%w\".%s_metadata ("
-    "  key TEXT PRIMARY KEY,"
-    "  value INTEGER NOT NULL"
-    ")",
-    db_name,
-    index_name
-  );
+  sql = sqlite3_mprintf("CREATE TABLE \"%w\".%s_metadata ("
+                        "  key TEXT PRIMARY KEY,"
+                        "  value INTEGER NOT NULL"
+                        ")",
+                        db_name, index_name);
 
   if (!sql) {
     rc = DISKANN_ERROR_NOMEM;
@@ -210,27 +200,42 @@ int diskann_create_index(
   sqlite3_free(sql);
 
   if (rc != SQLITE_OK) {
-    if (err_msg) sqlite3_free(err_msg);
+    if (err_msg)
+      sqlite3_free(err_msg);
     rc = DISKANN_ERROR;
     goto rollback;
   }
 
   /* Store index configuration as portable integers */
-  rc = store_metadata_int(db, db_name, index_name, "dimensions", (int64_t)config->dimensions);
-  if (rc != DISKANN_OK) goto rollback;
-  rc = store_metadata_int(db, db_name, index_name, "metric", (int64_t)config->metric);
-  if (rc != DISKANN_OK) goto rollback;
-  rc = store_metadata_int(db, db_name, index_name, "max_neighbors", (int64_t)config->max_neighbors);
-  if (rc != DISKANN_OK) goto rollback;
-  rc = store_metadata_int(db, db_name, index_name, "search_list_size", (int64_t)config->search_list_size);
-  if (rc != DISKANN_OK) goto rollback;
-  rc = store_metadata_int(db, db_name, index_name, "insert_list_size", (int64_t)config->insert_list_size);
-  if (rc != DISKANN_OK) goto rollback;
-  rc = store_metadata_int(db, db_name, index_name, "block_size", (int64_t)config->block_size);
-  if (rc != DISKANN_OK) goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "dimensions",
+                          (int64_t)config->dimensions);
+  if (rc != DISKANN_OK)
+    goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "metric",
+                          (int64_t)config->metric);
+  if (rc != DISKANN_OK)
+    goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "max_neighbors",
+                          (int64_t)config->max_neighbors);
+  if (rc != DISKANN_OK)
+    goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "search_list_size",
+                          (int64_t)config->search_list_size);
+  if (rc != DISKANN_OK)
+    goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "insert_list_size",
+                          (int64_t)config->insert_list_size);
+  if (rc != DISKANN_OK)
+    goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "block_size",
+                          (int64_t)config->block_size);
+  if (rc != DISKANN_OK)
+    goto rollback;
   /* Store pruning_alpha as fixed-point integer (×1000) for portability */
-  rc = store_metadata_int(db, db_name, index_name, "pruning_alpha_x1000", (int64_t)(DEFAULT_PRUNING_ALPHA * 1000.0));
-  if (rc != DISKANN_OK) goto rollback;
+  rc = store_metadata_int(db, db_name, index_name, "pruning_alpha_x1000",
+                          (int64_t)(DEFAULT_PRUNING_ALPHA * 1000.0));
+  if (rc != DISKANN_OK)
+    goto rollback;
 
   /* Commit the savepoint */
   sql = sqlite3_mprintf("RELEASE diskann_create_%s", index_name);
@@ -241,7 +246,8 @@ int diskann_create_index(
   rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
   sqlite3_free(sql);
   if (rc != SQLITE_OK) {
-    if (err_msg) sqlite3_free(err_msg);
+    if (err_msg)
+      sqlite3_free(err_msg);
     rc = DISKANN_ERROR;
     goto rollback;
   }
@@ -250,8 +256,8 @@ int diskann_create_index(
 
 rollback:
   sql = sqlite3_mprintf("ROLLBACK TO diskann_create_%s; "
-                         "RELEASE diskann_create_%s",
-                         index_name, index_name);
+                        "RELEASE diskann_create_%s",
+                        index_name, index_name);
   if (sql) {
     sqlite3_exec(db, sql, NULL, NULL, NULL);
     sqlite3_free(sql);
@@ -259,12 +265,8 @@ rollback:
   return rc;
 }
 
-int diskann_open_index(
-  sqlite3 *db,
-  const char *db_name,
-  const char *index_name,
-  DiskAnnIndex **out_index
-) {
+int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
+                       DiskAnnIndex **out_index) {
   DiskAnnIndex *idx = NULL;
   char *sql = NULL;
   sqlite3_stmt *stmt = NULL;
@@ -303,11 +305,9 @@ int diskann_open_index(
   }
 
   /* Check if shadow table exists */
-  sql = sqlite3_mprintf(
-    "SELECT name FROM \"%w\".sqlite_master WHERE type='table' AND name='%s_shadow'",
-    db_name,
-    index_name
-  );
+  sql = sqlite3_mprintf("SELECT name FROM \"%w\".sqlite_master WHERE "
+                        "type='table' AND name='%s_shadow'",
+                        db_name, index_name);
 
   if (!sql) {
     rc = DISKANN_ERROR_NOMEM;
@@ -334,11 +334,8 @@ int diskann_open_index(
   }
 
   /* Load metadata from metadata table */
-  sql = sqlite3_mprintf(
-    "SELECT key, value FROM \"%w\".%s_metadata",
-    db_name,
-    index_name
-  );
+  sql = sqlite3_mprintf("SELECT key, value FROM \"%w\".%s_metadata", db_name,
+                        index_name);
 
   if (!sql) {
     rc = DISKANN_ERROR_NOMEM;
@@ -358,7 +355,8 @@ int diskann_open_index(
   /* Read all metadata entries (stored as portable integers) */
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     const char *key = (const char *)sqlite3_column_text(stmt, 0);
-    if (!key) continue;
+    if (!key)
+      continue;
 
     int64_t value = sqlite3_column_int64(stmt, 1);
 
@@ -425,7 +423,7 @@ cleanup:
 
 void diskann_close_index(DiskAnnIndex *idx) {
   if (!idx) {
-    return;  /* Safe to call with NULL */
+    return; /* Safe to call with NULL */
   }
 
   /* Free malloc'd strings */
@@ -450,19 +448,6 @@ void diskann_close_index(DiskAnnIndex *idx) {
   free(idx);
 }
 
-int diskann_insert(
-  DiskAnnIndex *idx,
-  int64_t id,
-  const float *vector,
-  uint32_t dims
-) {
-  (void)idx;
-  (void)id;
-  (void)vector;
-  (void)dims;
-  return DISKANN_ERROR; /* Not implemented yet */
-}
-
 /*
 ** Delete a vector from the index.
 **
@@ -477,10 +462,7 @@ int diskann_insert(
 ** the NEIGHBOR's own rowid. This should be the deleted node's rowid. Our
 ** implementation fixes this.
 */
-int diskann_delete(
-  DiskAnnIndex *idx,
-  int64_t id
-) {
+int diskann_delete(DiskAnnIndex *idx, int64_t id) {
   BlobSpot *target_blob = NULL;
   BlobSpot *edge_blob = NULL;
   char *sql = NULL;
@@ -488,35 +470,43 @@ int diskann_delete(
   int rc = DISKANN_OK;
 
   /* Validate inputs */
-  if (!idx) return DISKANN_ERROR_INVALID;
+  if (!idx)
+    return DISKANN_ERROR_INVALID;
 
   /* Begin SAVEPOINT for atomicity */
   sql = sqlite3_mprintf("SAVEPOINT diskann_delete_%s", idx->index_name);
-  if (!sql) return DISKANN_ERROR_NOMEM;
+  if (!sql)
+    return DISKANN_ERROR_NOMEM;
   rc = sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
   sqlite3_free(sql);
   sql = NULL;
-  if (rc != SQLITE_OK) return DISKANN_ERROR;
+  if (rc != SQLITE_OK)
+    return DISKANN_ERROR;
 
   /* Open read-only BlobSpot for target node */
-  rc = blob_spot_create(idx, &target_blob, (uint64_t)id, idx->block_size, DISKANN_BLOB_READONLY);
+  rc = blob_spot_create(idx, &target_blob, (uint64_t)id, idx->block_size,
+                        DISKANN_BLOB_READONLY);
   if (rc == DISKANN_ROW_NOT_FOUND) {
     rc = DISKANN_ERROR_NOTFOUND;
     goto rollback;
   }
-  if (rc != DISKANN_OK) goto rollback;
+  if (rc != DISKANN_OK)
+    goto rollback;
 
   /* Read target node data */
   rc = blob_spot_reload(idx, target_blob, (uint64_t)id, idx->block_size);
-  if (rc != DISKANN_OK) goto rollback;
+  if (rc != DISKANN_OK)
+    goto rollback;
 
   /* Read edge count and clean up back-edges from neighbors */
   uint16_t n_edges = node_bin_edges(idx, target_blob);
 
   if (n_edges > 0) {
     /* Create writable BlobSpot (initial rowid = target, which exists) */
-    rc = blob_spot_create(idx, &edge_blob, (uint64_t)id, idx->block_size, DISKANN_BLOB_WRITABLE);
-    if (rc != DISKANN_OK) goto rollback;
+    rc = blob_spot_create(idx, &edge_blob, (uint64_t)id, idx->block_size,
+                          DISKANN_BLOB_WRITABLE);
+    if (rc != DISKANN_OK)
+      goto rollback;
 
     for (uint16_t i = 0; i < n_edges; i++) {
       uint64_t edge_rowid;
@@ -526,9 +516,11 @@ int diskann_delete(
       if (rc == DISKANN_ROW_NOT_FOUND) {
         continue; /* Zombie edge — neighbor already deleted */
       }
-      if (rc != DISKANN_OK) goto rollback;
+      if (rc != DISKANN_OK)
+        goto rollback;
 
-      /* Find back-edge pointing to the deleted node (NOT the neighbor's own id) */
+      /* Find back-edge pointing to the deleted node (NOT the neighbor's own id)
+       */
       int del_idx = node_bin_edge_find_idx(idx, edge_blob, (uint64_t)id);
       if (del_idx == -1) {
         continue; /* No back-edge (unidirectional or already removed) */
@@ -536,7 +528,8 @@ int diskann_delete(
 
       node_bin_delete_edge(idx, edge_blob, del_idx);
       rc = blob_spot_flush(idx, edge_blob);
-      if (rc != DISKANN_OK) goto rollback;
+      if (rc != DISKANN_OK)
+        goto rollback;
     }
 
     blob_spot_free(edge_blob);
@@ -548,10 +541,8 @@ int diskann_delete(
   target_blob = NULL;
 
   /* Delete shadow table row */
-  sql = sqlite3_mprintf(
-    "DELETE FROM \"%w\".%s WHERE id = ?",
-    idx->db_name, idx->shadow_name
-  );
+  sql = sqlite3_mprintf("DELETE FROM \"%w\".%s WHERE id = ?", idx->db_name,
+                        idx->shadow_name);
   if (!sql) {
     rc = DISKANN_ERROR_NOMEM;
     goto rollback;
@@ -593,13 +584,16 @@ int diskann_delete(
   return (rc == SQLITE_OK) ? DISKANN_OK : DISKANN_ERROR;
 
 rollback:
-  if (target_blob) blob_spot_free(target_blob);
-  if (edge_blob) blob_spot_free(edge_blob);
-  if (stmt) sqlite3_finalize(stmt);
+  if (target_blob)
+    blob_spot_free(target_blob);
+  if (edge_blob)
+    blob_spot_free(edge_blob);
+  if (stmt)
+    sqlite3_finalize(stmt);
 
   sql = sqlite3_mprintf("ROLLBACK TO diskann_delete_%s; "
-                         "RELEASE diskann_delete_%s",
-                         idx->index_name, idx->index_name);
+                        "RELEASE diskann_delete_%s",
+                        idx->index_name, idx->index_name);
   if (sql) {
     sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
     sqlite3_free(sql);
@@ -607,11 +601,8 @@ rollback:
   return rc;
 }
 
-int diskann_drop_index(
-  sqlite3 *db,
-  const char *db_name,
-  const char *index_name
-) {
+int diskann_drop_index(sqlite3 *db, const char *db_name,
+                       const char *index_name) {
   char *sql = NULL;
   char *err_msg = NULL;
   int rc;
@@ -651,7 +642,8 @@ int diskann_drop_index(
   }
 
   /* Also drop the metadata table */
-  sql = sqlite3_mprintf("DROP TABLE IF EXISTS \"%w\".%s_metadata", db_name, index_name);
+  sql = sqlite3_mprintf("DROP TABLE IF EXISTS \"%w\".%s_metadata", db_name,
+                        index_name);
 
   if (!sql) {
     return DISKANN_ERROR_NOMEM;
@@ -670,11 +662,8 @@ int diskann_drop_index(
   return DISKANN_OK;
 }
 
-int diskann_clear_index(
-  sqlite3 *db,
-  const char *db_name,
-  const char *index_name
-) {
+int diskann_clear_index(sqlite3 *db, const char *db_name,
+                        const char *index_name) {
   char *sql = NULL;
   char *err_msg = NULL;
   int rc;

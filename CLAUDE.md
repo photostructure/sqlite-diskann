@@ -14,6 +14,7 @@ sqlite-ann is a SQLite extension providing Approximate Nearest Neighbor (ANN) se
 When setting up build infrastructure, tooling, and CI/CD pipelines, use these sibling projects as references:
 
 ### ✅ DO follow: `../fs-metadata`
+
 - **Use for:** Cross-platform GHA (GitHub Actions) build pipeline
 - **Why:** Has a well-designed, clean cross-platform build setup that we want to match
 - **What to reference:**
@@ -23,6 +24,7 @@ When setting up build infrastructure, tooling, and CI/CD pipelines, use these si
   - clang-tidy integration and configuration
 
 ### ✅ Also reference: `../node-sqlite`
+
 - **Use for:** Additional tooling examples
 - **What to reference:**
   - AddressSanitizer (asan) setup
@@ -30,6 +32,7 @@ When setting up build infrastructure, tooling, and CI/CD pipelines, use these si
   - clang-tidy configuration
 
 ### ❌ DO NOT follow: `../sqlite-vec`
+
 - **Avoid:** The npm pipeline implementation
 - **Why:** It was bolted on after a fork and doesn't represent good design
 - **Note:** Other aspects of sqlite-vec may still be useful for SQLite extension patterns
@@ -41,12 +44,14 @@ When in doubt about build setup, packaging, CI/CD configuration, or static analy
 **CRITICAL: Preserve original copyright notices**
 
 This project is derived from libSQL's DiskANN implementation (MIT licensed). All derived code MUST:
+
 - Retain libSQL's original copyright: `Copyright 2024 the libSQL authors`
 - Add our modifications copyright: `Modifications Copyright 2025 PhotoStructure Inc.`
 - Keep the MIT license text intact
 - NEVER claim sole copyright on derived code
 
 **For new files (not derived from libSQL):**
+
 ```c
 /*
 ** Copyright 2025 PhotoStructure Inc.
@@ -55,6 +60,7 @@ This project is derived from libSQL's DiskANN implementation (MIT licensed). All
 ```
 
 **For derived/modified files:**
+
 ```c
 /*
 ** Derived from libSQL DiskANN implementation
@@ -67,6 +73,7 @@ This project is derived from libSQL's DiskANN implementation (MIT licensed). All
 ## Required Reading
 
 Before making ANY changes, you MUST read:
+
 1. @DESIGN-PRINCIPLES.md - C coding standards and best practices
 2. @TDD.md - Testing conventions and methodology
 3. Relevant source files for the area you're working on
@@ -74,11 +81,13 @@ Before making ANY changes, you MUST read:
 ## Code Style & Conventions
 
 ### C Standards
+
 - Use C17 standard (C11 minimum)
 - Follow all conventions in @DESIGN-PRINCIPLES.md
 - Compile with `-Wall -Wextra -Werror -pedantic`
 
 ### Naming Conventions
+
 ```c
 // Functions: snake_case with prefix
 int ann_index_create(ann_index_t **out);
@@ -97,6 +106,7 @@ static int compute_distance(const float *a, const float *b, size_t dim);
 ```
 
 ### File Organization
+
 ```
 src/
   ann_core.c          # Core ANN algorithm implementation
@@ -113,12 +123,14 @@ tests/
 ```
 
 ### Memory Management
+
 - Follow ownership model from @DESIGN-PRINCIPLES.md
 - All public APIs validate inputs
 - Use `goto cleanup` pattern for resource cleanup
 - Null pointers after free: `free(ptr); ptr = NULL;`
 
 ### Error Handling
+
 ```c
 // Return codes
 #define ANN_OK 0
@@ -143,6 +155,7 @@ if (!vectors) return ANN_ERR_NOMEM;
 ## SQLite Extension Conventions
 
 ### Loading Pattern
+
 ```c
 #ifdef _WIN32
 __declspec(dllexport)
@@ -159,11 +172,13 @@ int sqlite3_ann_init(
 ```
 
 ### Virtual Table Pattern
+
 - Use SQLite's virtual table interface for ANN indexes
 - Implement `xCreate`, `xConnect`, `xBestIndex`, `xFilter`, etc.
 - Document which SQLite versions are supported
 
 ### SQL Function Registration
+
 ```c
 // Register ANN search function
 sqlite3_create_function_v2(
@@ -175,17 +190,20 @@ sqlite3_create_function_v2(
 ## Testing Requirements
 
 ### Unit Tests
+
 - Test all vector operations (distance, normalization)
 - Test ANN algorithms with known datasets
 - Test error paths (NULL inputs, allocation failures)
 
 ### Integration Tests
+
 - Test SQLite extension loading
 - Test CREATE VIRTUAL TABLE
 - Test search queries with various parameters
 - Test concurrent access if supported
 
 ### Verification Commands
+
 ```bash
 # Compile with all warnings
 gcc -std=c17 -Wall -Wextra -Werror -pedantic -Wconversion \
@@ -206,16 +224,19 @@ gcc -fsanitize=address -g src/*.c tests/*.c -o test_suite
 ## Performance Considerations
 
 ### Vector Operations
+
 - Use SIMD when available (SSE, AVX, NEON)
 - Minimize allocations in hot paths
 - Consider cache-friendly data layouts
 
 ### Index Structure
+
 - Balance memory usage vs search speed
 - Support incremental index updates when possible
 - Document time/space complexity
 
 ### Benchmarking
+
 - Include benchmark suite for common operations
 - Test with realistic dataset sizes (10K, 100K, 1M vectors)
 - Measure queries per second and recall@k
@@ -223,12 +244,14 @@ gcc -fsanitize=address -g src/*.c tests/*.c -o test_suite
 ## Documentation
 
 ### Code Comments
+
 - Comment WHY, not WHAT
 - Document ownership and lifecycle of resources
 - Explain non-obvious algorithms or optimizations
 - Keep comments up-to-date (no "lava flow")
 
 ### API Documentation
+
 ```c
 /**
  * Create a new ANN index.
@@ -254,12 +277,14 @@ int ann_index_create(ann_index_t **out, size_t dim, ann_metric_t metric);
 ## Git Workflow
 
 ### Commits
+
 - Follow Conventional Commits format
 - Scope is the most-changed file (without extension)
 - Keep commits focused and atomic
 - DO NOT include Co-Authored-By tags
 
 Example:
+
 ```
 feat(ann_core): implement HNSW algorithm for ANN search
 
@@ -269,6 +294,7 @@ Benchmarks show 10x speedup vs brute force on 100K vectors.
 ```
 
 ### Branches
+
 - Feature branches: `feature/hnsw-index`
 - Bug fixes: `fix/normalize-vectors`
 - Experiments: `exp/simd-distance`
@@ -283,6 +309,7 @@ Benchmarks show 10x speedup vs brute force on 100K vectors.
 ## Build System
 
 Use a simple Makefile or CMake:
+
 ```makefile
 # Example Makefile snippet
 CFLAGS = -std=c17 -Wall -Wextra -Werror -pedantic -fPIC
@@ -330,6 +357,7 @@ The package.json must be configured for dual-format distribution:
 ```
 
 **Why this matters:**
+
 - Node.js projects may use `require()` (CJS) or `import` (ESM)
 - TypeScript consumers need correct `.d.ts` vs `.d.cts` types
 - Bundlers (webpack, vite, rollup) need to understand the export map
@@ -366,15 +394,17 @@ All wrapper functions (createDiskAnnIndex, searchNearest, insertVector, deleteVe
 ### Package Distribution
 
 **Include in npm package:**
+
 - `build/` - Prebuilt native binaries for supported platforms
 - `src/` - TypeScript source for sourcemaps and debugging
 - `dist/` - Compiled CJS/ESM JavaScript and type definitions
 - `README.md`, `LICENSE`
 
 **Exclude from npm package:**
+
 - Development docs (CLAUDE.md, DESIGN-PRINCIPLES.md, TDD.md)
 - Tests (except maybe a smoke test)
-- Build artifacts (compile_commands.json, *.o files)
+- Build artifacts (compile_commands.json, \*.o files)
 
 The `files` array in package.json controls what gets published. Be conservative - users don't need build infrastructure.
 

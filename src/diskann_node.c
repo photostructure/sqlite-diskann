@@ -17,10 +17,8 @@
 **************************************************************************/
 
 uint32_t node_edges_max_count(const DiskAnnIndex *idx) {
-  uint32_t node_overhead =
-      NODE_METADATA_SIZE + idx->nNodeVectorSize;
-  uint32_t edge_overhead =
-      idx->nEdgeVectorSize + EDGE_METADATA_SIZE;
+  uint32_t node_overhead = NODE_METADATA_SIZE + idx->nNodeVectorSize;
+  uint32_t edge_overhead = idx->nEdgeVectorSize + EDGE_METADATA_SIZE;
   assert(idx->block_size >= node_overhead);
   return (idx->block_size - node_overhead) / edge_overhead;
 }
@@ -66,17 +64,16 @@ void node_bin_edge(const DiskAnnIndex *idx, const BlobSpot *spot, int edge_idx,
   uint32_t meta_offset = node_edges_metadata_offset(idx);
 
   if (rowid != NULL) {
-    assert(meta_offset +
-               (uint32_t)(edge_idx + 1) * EDGE_METADATA_SIZE <=
+    assert(meta_offset + (uint32_t)(edge_idx + 1) * EDGE_METADATA_SIZE <=
            spot->buffer_size);
-    *rowid = read_le64(spot->buffer + meta_offset +
-                       (size_t)edge_idx * EDGE_METADATA_SIZE +
-                       sizeof(uint64_t));
+    *rowid =
+        read_le64(spot->buffer + meta_offset +
+                  (size_t)edge_idx * EDGE_METADATA_SIZE + sizeof(uint64_t));
   }
   if (distance != NULL) {
-    uint32_t raw = read_le32(spot->buffer + meta_offset +
-                             (size_t)edge_idx * EDGE_METADATA_SIZE +
-                             sizeof(uint32_t));
+    uint32_t raw =
+        read_le32(spot->buffer + meta_offset +
+                  (size_t)edge_idx * EDGE_METADATA_SIZE + sizeof(uint32_t));
     memcpy(distance, &raw, sizeof(float));
   }
   if (vector != NULL) {
@@ -146,8 +143,7 @@ void node_bin_delete_edge(const DiskAnnIndex *idx, BlobSpot *spot,
                      (uint32_t)delete_idx * idx->nEdgeVectorSize;
   uint32_t last_vec = NODE_METADATA_SIZE + idx->nNodeVectorSize +
                       (uint32_t)(n_edges - 1) * idx->nEdgeVectorSize;
-  uint32_t del_meta =
-      meta_offset + (uint32_t)delete_idx * EDGE_METADATA_SIZE;
+  uint32_t del_meta = meta_offset + (uint32_t)delete_idx * EDGE_METADATA_SIZE;
   uint32_t last_meta =
       meta_offset + (uint32_t)(n_edges - 1) * EDGE_METADATA_SIZE;
 
@@ -160,8 +156,7 @@ void node_bin_delete_edge(const DiskAnnIndex *idx, BlobSpot *spot,
   }
 
   /* Decrement edge count */
-  write_le16(spot->buffer + sizeof(uint64_t),
-             (uint16_t)(n_edges - 1));
+  write_le16(spot->buffer + sizeof(uint64_t), (uint16_t)(n_edges - 1));
 }
 
 void node_bin_prune_edges(const DiskAnnIndex *idx, BlobSpot *spot,
@@ -243,8 +238,7 @@ void buffer_insert(uint8_t *buf, int size, int max_size, int insert_idx,
   memmove(buf + (size_t)(insert_idx + 1) * (size_t)item_size,
           buf + (size_t)insert_idx * (size_t)item_size,
           (size_t)items_to_move * (size_t)item_size);
-  memcpy(buf + (size_t)insert_idx * (size_t)item_size, item,
-         (size_t)item_size);
+  memcpy(buf + (size_t)insert_idx * (size_t)item_size, item, (size_t)item_size);
 }
 
 void buffer_delete(uint8_t *buf, int size, int delete_idx, int item_size) {

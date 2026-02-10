@@ -10,10 +10,7 @@
 import type { DatabaseSyncInstance } from "@photostructure/sqlite";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  DiskAnnIndexOptions,
-  NearestNeighborResult,
-} from "./types.js";
+import type { DiskAnnIndexOptions, NearestNeighborResult } from "./types.js";
 
 // Type alias for convenience
 type DatabaseSync = DatabaseSyncInstance;
@@ -102,7 +99,6 @@ export function loadDiskAnnExtension(db: DatabaseSync): void {
   db.loadExtension(extPath);
 }
 
-
 /**
  * Helper to create DiskANN virtual table with proper SQL escaping
  *
@@ -164,7 +160,6 @@ export function createDiskAnnIndex(
 
   db.exec(sql);
 }
-
 
 /**
  * Search for k nearest neighbors in a DiskANN index
@@ -276,11 +271,7 @@ export function insertVector(
  * @param tableName - Name of the DiskANN virtual table
  * @param id - ID of vector to delete
  */
-export function deleteVector(
-  db: DatabaseSync,
-  tableName: string,
-  id: number
-): void {
+export function deleteVector(db: DatabaseSync, tableName: string, id: number): void {
   // Validate table name to prevent SQL injection
   if (!isValidIdentifier(tableName)) {
     throw new Error(

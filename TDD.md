@@ -105,6 +105,7 @@ static int tests_failed = 0;
 ## Test Organization
 
 ### Directory Structure
+
 ```
 tests/
   test_framework.h       # Testing utilities (or Unity)
@@ -121,18 +122,21 @@ tests/
 ### Test Categories
 
 **Unit Tests** - Test individual functions in isolation
+
 - Vector distance calculations
 - Vector normalization
 - Index data structure operations
 - Memory allocation/deallocation
 
 **Integration Tests** - Test components working together
+
 - SQLite extension loading
 - CREATE VIRTUAL TABLE
 - INSERT INTO virtual table
 - SELECT with ANN search
 
 **Regression Tests** - Prevent known bugs from returning
+
 - Segfaults with non-normalized vectors
 - Memory leaks in cleanup paths
 - Edge cases (zero dimension, empty index)
@@ -140,6 +144,7 @@ tests/
 ## Writing Good Tests
 
 ### Test One Thing
+
 ```c
 // Good: focused test
 void test_distance_euclidean_2d(void) {
@@ -157,6 +162,7 @@ void test_distances(void) {
 ```
 
 ### Test Error Paths
+
 ```c
 void test_create_index_null_output(void) {
     int rc = ann_index_create(NULL, 128, ANN_METRIC_EUCLIDEAN);
@@ -177,6 +183,7 @@ void test_create_index_huge_dimension(void) {
 ```
 
 ### Test Memory Management
+
 ```c
 void test_index_lifecycle(void) {
     ann_index_t *idx = NULL;
@@ -200,6 +207,7 @@ void test_index_lifecycle(void) {
 ## Test Data Management
 
 ### Small Fixed Data
+
 ```c
 // Hardcoded test vectors
 static const float TEST_VECTORS[][3] = {
@@ -210,6 +218,7 @@ static const float TEST_VECTORS[][3] = {
 ```
 
 ### Large Generated Data
+
 ```c
 // Helper to generate random test vectors
 float *generate_random_vectors(size_t count, size_t dim, unsigned int seed) {
@@ -231,6 +240,7 @@ void test_search_large_index(void) {
 ```
 
 ### Binary Fixtures
+
 ```c
 // Load test vectors from file
 float *load_vectors_from_file(const char *path, size_t *count, size_t *dim) {
@@ -248,6 +258,7 @@ float *load_vectors_from_file(const char *path, size_t *count, size_t *dim) {
 ## SQLite Extension Testing
 
 ### Test Extension Loading
+
 ```c
 #include <sqlite3.h>
 
@@ -264,6 +275,7 @@ void test_extension_loads(void) {
 ```
 
 ### Test Virtual Table Creation
+
 ```c
 void test_create_virtual_table(void) {
     sqlite3 *db;
@@ -286,6 +298,7 @@ void test_create_virtual_table(void) {
 ```
 
 ### Test Search Queries
+
 ```c
 void test_ann_search_query(void) {
     sqlite3 *db;
@@ -318,6 +331,7 @@ void test_ann_search_query(void) {
 ## Verification & Continuous Testing
 
 ### Makefile Integration
+
 ```makefile
 .PHONY: test test-unit test-integration test-mem
 
@@ -348,6 +362,7 @@ test-sanitize:
 ```
 
 ### Pre-Commit Hook
+
 ```bash
 #!/bin/bash
 # .git/hooks/pre-commit
@@ -414,6 +429,7 @@ Aim for >80% coverage, 100% for critical paths (search, insert, memory managemen
 ## Common Testing Patterns
 
 ### Setup/Teardown Pattern
+
 ```c
 static ann_index_t *test_index = NULL;
 
@@ -430,6 +446,7 @@ void tearDown(void) {
 ```
 
 ### Parameterized Tests (Manual)
+
 ```c
 typedef struct {
     const char *name;
@@ -457,6 +474,7 @@ void test_distance_metrics(void) {
 ## When Tests Fail
 
 ### Debug Process
+
 1. **Run single test**: Isolate the failing test
 2. **Add printfs**: Debug intermediate values
 3. **Valgrind**: Check for memory errors
@@ -464,6 +482,7 @@ void test_distance_metrics(void) {
 5. **Simplify**: Reduce to minimal failing case
 
 ### Example Debug Session
+
 ```bash
 # Run single test with verbose output
 ./test_suite --test=test_search_edge_case --verbose
@@ -483,6 +502,7 @@ gdb --args ./test_suite --test=test_search_edge_case
 ### Example 1: Vector Normalization
 
 **1. Write failing test:**
+
 ```c
 void test_normalize_vector(void) {
     float vec[] = {3.0f, 4.0f};
@@ -494,6 +514,7 @@ void test_normalize_vector(void) {
 ```
 
 **2. Write minimal implementation:**
+
 ```c
 int normalize_vector(float *vec, size_t dim) {
     if (!vec || dim == 0) return ANN_ERR_NULL;

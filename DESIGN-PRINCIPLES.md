@@ -10,17 +10,20 @@
 ### Ownership and Lifecycle
 
 Every allocation must have a clear owner. Document ownership when not obvious:
+
 - `// Returns malloc'd string - caller must free`
 - `// Returns borrowed pointer - do NOT free`
 - `// Takes ownership - do NOT free after calling`
 
 **Always check allocations:**
+
 ```c
 void *buf = malloc(size);
 if (!buf) return ERROR_NOMEM;  // Fail visibly
 ```
 
 **Defensive post-free pattern:**
+
 ```c
 free(ptr);
 ptr = NULL;  // Prevents double-free, catches use-after-free bugs
@@ -49,6 +52,7 @@ cleanup:
 ### Fail Early and Visibly
 
 **Don't mask errors with defaults:**
+
 ```c
 // Bad: int get_age(User *u) { return u ? u->age : 0; }  // 0 not valid!
 // Good: int get_age(User *u, int *age) { if (!u || !age) return ERR; *age = u->age; return OK; }
@@ -59,6 +63,7 @@ cleanup:
 ### Return Codes and Output Parameters
 
 Return status codes (0=OK, negative=error), use output params for values:
+
 ```c
 int parse(const char *s, long *result) {
     if (!s || !result) return ERR_NULL;
@@ -72,6 +77,7 @@ int parse(const char *s, long *result) {
 ### Assert vs Runtime Checks
 
 **Public API:** Validate all inputs with runtime checks. **Internal:** Assert preconditions (debug only).
+
 ```c
 int public_api(const char *d) { if (!d) return ERR_NULL; return internal(d); }
 static void internal(const char *d) { assert(d); /* work */ }
@@ -104,6 +110,7 @@ static void internal(const char *d) { assert(d); /* work */ }
 ### Portable Types
 
 **Use `<stdint.h>` for fixed-width types:**
+
 ```c
 int32_t  count;    // Exactly 32 bits
 uint64_t offset;   // Exactly 64 unsigned
@@ -115,6 +122,7 @@ size_t   length;   // Pointer-sized
 ### Printf Format Specifiers
 
 **Use `<inttypes.h>` macros:**
+
 ```c
 uint64_t big = 123456ULL;
 printf("%" PRIu64 "\n", big);  // Portable
@@ -157,6 +165,7 @@ static_assert(sizeof(void*) == sizeof(size_t), "size_t mismatch");
 ### When to Be Defensive
 
 **Public APIs:** Validate all inputs. **Internal code:** Trust preconditions, use assert.
+
 ```c
 // Public: validate everything
 int vec_create(vector_t **out, size_t cap) {
@@ -183,6 +192,7 @@ static void resize(vector_t *v) {
 **Guards:** `#pragma once` or `#ifndef HEADER_H / #define HEADER_H / #endif`
 
 **Opaque pointers:** Forward-declare structs in headers, define in implementation:
+
 ```c
 // Header: typedef struct Database Database; Database *db_open(const char *path);
 // Impl: struct Database { FILE *file; void *cache; };  // Hidden internals
@@ -234,30 +244,35 @@ afl-fuzz -i inputs/ -o findings/ ./program
 ## Quick Reference Checklist
 
 **Memory:**
+
 - ✅ Every malloc has paired free
 - ✅ Allocations checked for NULL
 - ✅ Pointers nulled after free
 - ✅ Cleanup handles partial init
 
 **Errors:**
+
 - ✅ Explicit error codes returned
 - ✅ No silent defaults on failure
 - ✅ Public APIs validate inputs
 - ✅ Internal code uses assert
 
 **Portability:**
+
 - ✅ `<stdint.h>` types (int32_t)
 - ✅ `<inttypes.h>` printf (PRId64)
 - ✅ No sizeof assumptions
 - ✅ Platform code in #ifdef
 
 **Modern C:**
+
 - ✅ static_assert for compile checks
 - ✅ Avoids VLAs
 - ✅ Avoids gets/strcpy
 - ✅ C11+ standard
 
 **Testing:**
+
 - ✅ -Wall -Wextra -Werror
 - ✅ ASan/valgrind clean
 - ✅ Static analysis passes

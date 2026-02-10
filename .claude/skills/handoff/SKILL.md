@@ -22,12 +22,14 @@ Update a Technical Project Plan with everything learned in this session so the n
 ### 1. Phase Progress
 
 Update phase checkboxes:
+
 - Mark completed phases with `[x]`
 - Keep current/next phase unchecked `[ ]`
 
 ### 2. Tribal Knowledge
 
 Add to the "Tribal Knowledge" section:
+
 - **Non-obvious discoveries**: Things that aren't in docs
 - **Gotchas**: Edge cases, pitfalls, surprising behavior
 - **Why not X**: Approaches tried and why they didn't work
@@ -35,6 +37,7 @@ Add to the "Tribal Knowledge" section:
 - **Historical context**: Why things are the way they are
 
 Example:
+
 ```markdown
 ## Tribal Knowledge
 
@@ -47,6 +50,7 @@ Example:
 ### 3. Tasks Status
 
 Update the "Tasks" section:
+
 - Mark completed tasks with `[x]`
 - Add verification commands you used
 - Document test results
@@ -55,6 +59,7 @@ Update the "Tasks" section:
 ### 4. Solutions Evaluation
 
 Update the "Solutions" section:
+
 - Add pros/cons discovered during implementation
 - Document why chosen approach is working (or isn't)
 - Note alternative approaches to try if current fails
@@ -62,10 +67,12 @@ Update the "Solutions" section:
 ### 5. Clear Blockers
 
 If blocked, be explicit:
+
 ```markdown
 ## BLOCKER
 
 Cannot proceed until:
+
 - [ ] User provides API key for embeddings service
 - [ ] Upstream bug in SQLite extension is fixed
 
@@ -75,6 +82,7 @@ Next session should start by addressing these blockers.
 ## Handoff Checklist
 
 Before ending session, ensure TPP includes:
+
 - [ ] Current phase is clear (first unchecked checkbox)
 - [ ] All discoveries documented in Tribal Knowledge
 - [ ] Failed approaches documented with reasons
@@ -93,6 +101,7 @@ Prompts you to update `_todo/20250209-ann-search.md` with session discoveries.
 ## Format
 
 The handoff should read like **notes from a departing engineer**:
+
 - What did I learn?
 - What worked? What didn't?
 - What should the next person know?
@@ -114,6 +123,7 @@ Don't just list what you did - explain the **why** behind decisions and discover
 ## Tribal Knowledge (Updated 2025-02-09)
 
 **Session findings:**
+
 - Vector normalization is critical - SQLite's vector extension segfaults on non-normalized vectors
 - Tried HNSW algorithm first, but memory usage was prohibitive for large datasets (>1M vectors)
 - Switched to IVF-based approach with 256 clusters - 10x faster queries
@@ -121,10 +131,12 @@ Don't just list what you did - explain the **why** behind decisions and discover
 - Test coverage gap: need integration tests for concurrent searches
 
 **Blockers:**
+
 - Need user decision: should we support cosine similarity or only Euclidean distance?
 - SQLite extension build requires gcc 11+ (not available in CI yet)
 
 **Next session should:**
+
 1. Resolve blocker about similarity metric
 2. Add integration tests for concurrent searches
 3. Continue with "Integration" phase

@@ -43,11 +43,11 @@
 **   This bypasses diskann_insert() (not yet implemented) and directly
 **   constructs valid graph BLOBs using the node binary format layer.
 */
-#include "unity/unity.h"
 #include "../../src/diskann.h"
 #include "../../src/diskann_blob.h"
 #include "../../src/diskann_internal.h"
 #include "../../src/diskann_node.h"
+#include "unity/unity.h"
 #include <math.h>
 #include <sqlite3.h>
 #include <stdlib.h>
@@ -96,9 +96,8 @@ static DiskAnnIndex *create_test_index(sqlite3 *db, const char *name,
 /* Insert a zeroed BLOB row into the shadow table (for later node_bin_init) */
 static int insert_shadow_row(sqlite3 *db, const char *index_name, int64_t id,
                              uint32_t block_size) {
-  char *sql =
-      sqlite3_mprintf("INSERT INTO %s_shadow (id, data) VALUES (?, ?)",
-                       index_name);
+  char *sql = sqlite3_mprintf("INSERT INTO %s_shadow (id, data) VALUES (?, ?)",
+                              index_name);
   if (!sql)
     return SQLITE_NOMEM;
 
@@ -172,14 +171,15 @@ static int insert_graph_node(DiskAnnIndex *idx, int64_t rowid,
 static void brute_force_knn(const float *vectors, int n_vectors, uint32_t dims,
                             uint8_t metric, const float *query, int k,
                             int64_t *out_ids, float *out_distances) {
-  if (n_vectors <= 0) return;
+  if (n_vectors <= 0)
+    return;
 
   /* Compute all distances */
   float *all_distances = (float *)malloc((size_t)n_vectors * sizeof(float));
   int *indices = (int *)malloc((size_t)n_vectors * sizeof(int));
   for (int i = 0; i < n_vectors; i++) {
-    all_distances[i] = diskann_distance(query, vectors + (size_t)(uint32_t)i * dims,
-                                        dims, metric);
+    all_distances[i] = diskann_distance(
+        query, vectors + (size_t)(uint32_t)i * dims, dims, metric);
     indices[i] = i;
   }
 
@@ -222,7 +222,8 @@ void test_search_null_query(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   DiskAnnResult results[1];
@@ -238,7 +239,8 @@ void test_search_null_results(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float query[TEST_DIMS] = {1.0f, 0.0f, 0.0f};
@@ -254,7 +256,8 @@ void test_search_dimension_mismatch(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float query[5] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -272,7 +275,8 @@ void test_search_negative_k(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float query[TEST_DIMS] = {1.0f, 0.0f, 0.0f};
@@ -289,7 +293,8 @@ void test_search_zero_k(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   /* Insert one node so index is non-empty */
@@ -314,7 +319,8 @@ void test_search_empty_index(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float query[TEST_DIMS] = {1.0f, 2.0f, 3.0f};
@@ -335,7 +341,8 @@ void test_search_single_vector_exact(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float vec[TEST_DIMS] = {1.0f, 2.0f, 3.0f};
@@ -358,7 +365,8 @@ void test_search_single_vector_different_query(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float vec[TEST_DIMS] = {1.0f, 0.0f, 0.0f};
@@ -383,7 +391,8 @@ void test_search_single_vector_k_larger(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   float vec[TEST_DIMS] = {1.0f, 2.0f, 3.0f};
@@ -432,7 +441,8 @@ static const float VEC_DIAG[TEST_DIMS] = {1.0f, 1.0f, 1.0f};
 
 /* Build the 4-node fully-connected test graph */
 static DiskAnnIndex *build_four_node_graph(sqlite3 *db) {
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   if (!idx)
     return NULL;
 
@@ -445,24 +455,32 @@ static DiskAnnIndex *build_four_node_graph(sqlite3 *db) {
   float d34 = diskann_distance_l2(VEC_UP, VEC_DIAG, TEST_DIMS);
 
   /* Node 1: edges to 2, 3, 4 */
-  TestEdge edges1[] = {{2, d12, VEC_NORTH}, {3, d13, VEC_UP}, {4, d14, VEC_DIAG}};
+  TestEdge edges1[] = {
+      {2, d12, VEC_NORTH}, {3, d13, VEC_UP}, {4, d14, VEC_DIAG}};
   int rc = insert_graph_node(idx, 1, VEC_EAST, edges1, 3);
-  if (rc != DISKANN_OK) return NULL;
+  if (rc != DISKANN_OK)
+    return NULL;
 
   /* Node 2: edges to 1, 3, 4 */
-  TestEdge edges2[] = {{1, d12, VEC_EAST}, {3, d23, VEC_UP}, {4, d24, VEC_DIAG}};
+  TestEdge edges2[] = {
+      {1, d12, VEC_EAST}, {3, d23, VEC_UP}, {4, d24, VEC_DIAG}};
   rc = insert_graph_node(idx, 2, VEC_NORTH, edges2, 3);
-  if (rc != DISKANN_OK) return NULL;
+  if (rc != DISKANN_OK)
+    return NULL;
 
   /* Node 3: edges to 1, 2, 4 */
-  TestEdge edges3[] = {{1, d13, VEC_EAST}, {2, d23, VEC_NORTH}, {4, d34, VEC_DIAG}};
+  TestEdge edges3[] = {
+      {1, d13, VEC_EAST}, {2, d23, VEC_NORTH}, {4, d34, VEC_DIAG}};
   rc = insert_graph_node(idx, 3, VEC_UP, edges3, 3);
-  if (rc != DISKANN_OK) return NULL;
+  if (rc != DISKANN_OK)
+    return NULL;
 
   /* Node 4: edges to 1, 2, 3 */
-  TestEdge edges4[] = {{1, d14, VEC_EAST}, {2, d24, VEC_NORTH}, {3, d34, VEC_UP}};
+  TestEdge edges4[] = {
+      {1, d14, VEC_EAST}, {2, d24, VEC_NORTH}, {3, d34, VEC_UP}};
   rc = insert_graph_node(idx, 4, VEC_DIAG, edges4, 3);
-  if (rc != DISKANN_OK) return NULL;
+  if (rc != DISKANN_OK)
+    return NULL;
 
   return idx;
 }
@@ -597,7 +615,8 @@ void test_search_brute_force_recall(void) {
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
-  DiskAnnIndex *idx = create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
+  DiskAnnIndex *idx =
+      create_test_index(db, "test_idx", DISKANN_METRIC_EUCLIDEAN);
   TEST_ASSERT_NOT_NULL(idx);
 
   const int N = 50;

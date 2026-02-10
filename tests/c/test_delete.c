@@ -4,11 +4,11 @@
 ** Copyright 2025 PhotoStructure Inc.
 ** MIT License
 */
-#include "unity/unity.h"
 #include "../../src/diskann.h"
 #include "../../src/diskann_blob.h"
 #include "../../src/diskann_internal.h"
 #include "../../src/diskann_node.h"
+#include "unity/unity.h"
 #include <sqlite3.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +28,7 @@
 ** Create and open a test index with 3D / 256-byte-block config.
 ** Returns NULL on failure.
 */
-static DiskAnnIndex *create_and_open_test_index(sqlite3 *db,
-                                                const char *name) {
+static DiskAnnIndex *create_and_open_test_index(sqlite3 *db, const char *name) {
   DiskAnnConfig config = {.dimensions = TEST_DIMS,
                           .metric = DISKANN_METRIC_EUCLIDEAN,
                           .max_neighbors = 8,
@@ -95,9 +94,8 @@ static int insert_node(sqlite3 *db, DiskAnnIndex *idx, int64_t id,
   }
 
   /* INSERT into shadow table */
-  char *sql =
-      sqlite3_mprintf("INSERT INTO %s_shadow (id, data) VALUES (?, ?)",
-                       idx->index_name);
+  char *sql = sqlite3_mprintf("INSERT INTO %s_shadow (id, data) VALUES (?, ?)",
+                              idx->index_name);
   if (!sql) {
     free(buf);
     return SQLITE_NOMEM;
@@ -125,8 +123,7 @@ static int insert_node(sqlite3 *db, DiskAnnIndex *idx, int64_t id,
 ** Count rows in the shadow table.
 */
 static int count_shadow_rows(sqlite3 *db, const char *index_name) {
-  char *sql =
-      sqlite3_mprintf("SELECT COUNT(*) FROM %s_shadow", index_name);
+  char *sql = sqlite3_mprintf("SELECT COUNT(*) FROM %s_shadow", index_name);
   if (!sql)
     return -1;
 
@@ -166,11 +163,9 @@ static int read_edge_count(DiskAnnIndex *idx, int64_t id) {
 ** Check if a node has an edge to a specific target rowid.
 ** Returns 1 if found, 0 if not, -1 on error.
 */
-static int has_edge_to(DiskAnnIndex *idx, int64_t node_id,
-                       int64_t target_id) {
+static int has_edge_to(DiskAnnIndex *idx, int64_t node_id, int64_t target_id) {
   BlobSpot *spot = NULL;
-  int rc =
-      blob_spot_create(idx, &spot, (uint64_t)node_id, idx->block_size, 0);
+  int rc = blob_spot_create(idx, &spot, (uint64_t)node_id, idx->block_size, 0);
   if (rc != DISKANN_OK)
     return -1;
 
@@ -293,24 +288,21 @@ void test_delete_node_cleans_backedges(void) {
   uint64_t a_edge_ids[] = {2, 3};
   float a_edge_vecs[] = {0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
   float a_edge_dists[] = {1.0f, 1.0f};
-  rc = insert_node(db, idx, 1, vec_a, a_edge_ids, a_edge_vecs, a_edge_dists,
-                   2);
+  rc = insert_node(db, idx, 1, vec_a, a_edge_ids, a_edge_vecs, a_edge_dists, 2);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
   /* Node B (id=2): edge to A(1) */
   uint64_t b_edge_ids[] = {1};
   float b_edge_vecs[] = {1.0f, 0.0f, 0.0f};
   float b_edge_dists[] = {1.0f};
-  rc = insert_node(db, idx, 2, vec_b, b_edge_ids, b_edge_vecs, b_edge_dists,
-                   1);
+  rc = insert_node(db, idx, 2, vec_b, b_edge_ids, b_edge_vecs, b_edge_dists, 1);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
   /* Node C (id=3): edge to A(1) */
   uint64_t c_edge_ids[] = {1};
   float c_edge_vecs[] = {1.0f, 0.0f, 0.0f};
   float c_edge_dists[] = {1.0f};
-  rc = insert_node(db, idx, 3, vec_c, c_edge_ids, c_edge_vecs, c_edge_dists,
-                   1);
+  rc = insert_node(db, idx, 3, vec_c, c_edge_ids, c_edge_vecs, c_edge_dists, 1);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
 
   /* Verify initial state */
@@ -412,8 +404,7 @@ void test_delete_zombie_edge(void) {
   uint64_t a_edge_ids[] = {2};
   float a_edge_vecs[] = {0.0f, 1.0f, 0.0f};
   float a_edge_dists[] = {1.0f};
-  rc = insert_node(db, idx, 1, vec_a, a_edge_ids, a_edge_vecs, a_edge_dists,
-                   1);
+  rc = insert_node(db, idx, 1, vec_a, a_edge_ids, a_edge_vecs, a_edge_dists, 1);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);
   (void)vec_b; /* B not inserted — simulates already-deleted node */
 

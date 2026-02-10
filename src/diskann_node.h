@@ -84,10 +84,10 @@ static inline void write_le64(uint8_t *p, uint64_t v) {
 typedef struct DiskAnnNode DiskAnnNode;
 
 struct DiskAnnNode {
-  uint64_t rowid;         /* Node ID */
-  int visited;            /* Has this node been visited during search? */
-  DiskAnnNode *next;      /* Next node in visited list (linked list) */
-  BlobSpot *blob_spot;    /* BLOB handle for node data (NULL if not loaded) */
+  uint64_t rowid;      /* Node ID */
+  int visited;         /* Has this node been visited during search? */
+  DiskAnnNode *next;   /* Next node in visited list (linked list) */
+  BlobSpot *blob_spot; /* BLOB handle for node data (NULL if not loaded) */
 };
 
 /**************************************************************************

@@ -30,27 +30,27 @@ extern "C" {
 ** - All other fields: owned by this struct
 */
 struct DiskAnnIndex {
-  sqlite3 *db;              /* Database connection (borrowed) */
-  char *db_name;            /* Database schema name (e.g., "main") - malloc'd */
-  char *index_name;         /* Index name - malloc'd */
-  char *shadow_name;        /* Shadow table name (e.g., "idx_shadow") - malloc'd */
+  sqlite3 *db;       /* Database connection (borrowed) */
+  char *db_name;     /* Database schema name (e.g., "main") - malloc'd */
+  char *index_name;  /* Index name - malloc'd */
+  char *shadow_name; /* Shadow table name (e.g., "idx_shadow") - malloc'd */
 
   /* Index configuration (loaded from metadata) */
-  uint32_t dimensions;      /* Vector dimensionality */
-  uint8_t metric;           /* Distance metric (DISKANN_METRIC_*) */
-  uint32_t max_neighbors;   /* Max edges per node */
+  uint32_t dimensions;       /* Vector dimensionality */
+  uint8_t metric;            /* Distance metric (DISKANN_METRIC_*) */
+  uint32_t max_neighbors;    /* Max edges per node */
   uint32_t search_list_size; /* Search beam width */
   uint32_t insert_list_size; /* Insert beam width */
-  uint32_t block_size;      /* Node block size in bytes */
-  double pruning_alpha;     /* Edge pruning threshold (default 1.2) */
+  uint32_t block_size;       /* Node block size in bytes */
+  double pruning_alpha;      /* Edge pruning threshold (default 1.2) */
 
   /* Derived layout fields (computed from config at open time) */
   uint32_t nNodeVectorSize; /* dims * sizeof(float) for float32 */
   uint32_t nEdgeVectorSize; /* Same as nNodeVectorSize for float32-only */
 
   /* Statistics (for debugging/profiling) */
-  uint64_t num_reads;       /* Number of BLOB reads */
-  uint64_t num_writes;      /* Number of BLOB writes */
+  uint64_t num_reads;  /* Number of BLOB reads */
+  uint64_t num_writes; /* Number of BLOB writes */
 };
 
 /*

@@ -7,6 +7,7 @@ A **Technical Project Plan (TPP)** is a structured markdown document that guides
 ### Why Use TPPs?
 
 **Context windows fill up.** On complex features, you'll hit limits before finishing. Rather than using `/compact` (which often loses important details), TPPs preserve:
+
 - **Decisions made** - Why approach X over Y
 - **Failures documented** - What didn't work and why
 - **Tribal knowledge** - Non-obvious gotchas
@@ -30,6 +31,7 @@ _todo/   _todo/    _todo/     _todo/     _todo/    _todo/    _done/
 Date prefix ensures chronological sorting. Feature name should be concise (3-5 words max).
 
 Examples:
+
 - `_todo/20250209-hnsw-index.md`
 - `_todo/20250209-vector-normalization.md`
 - `_done/20250208-sqlite-extension.md`
@@ -38,13 +40,15 @@ Examples:
 
 Every TPP follows this template:
 
-```markdown
+````markdown
 # Feature Name
 
 ## Summary
+
 Brief problem description (under 10 lines)
 
 ## Current Phase
+
 - [ ] Research & Planning
 - [ ] Test Design
 - [ ] Implementation Design
@@ -55,37 +59,46 @@ Brief problem description (under 10 lines)
 - [ ] Final Review
 
 ## Required Reading
+
 - `CLAUDE.md` - Project conventions
 - `TDD.md` - Testing methodology
 - `DESIGN-PRINCIPLES.md` - C coding standards
 - `src/relevant_file.c` - Existing implementation
 
 ## Description
+
 Detailed context (under 20 lines)
+
 - What problem are we solving?
 - What are the constraints?
 - What's the desired outcome?
 
 ## Tribal Knowledge
+
 Non-obvious details, gotchas, historical context
+
 - Vector normalization is critical - segfaults otherwise
 - SQLite's vector extension loads lazily
 - Distance threshold 0.15 gives best precision/recall
 
 ## Solutions
+
 Evaluated alternatives with pros/cons
 
 ### Option 1: HNSW Algorithm
+
 **Pros:** Fast queries, good recall
 **Cons:** High memory usage
 **Status:** Chosen approach
 
 ### Option 2: LSH (Locality-Sensitive Hashing)
+
 **Pros:** Lower memory
 **Cons:** Lower recall, complex tuning
 **Status:** Rejected
 
 ## Tasks
+
 - [ ] Implement HNSW graph construction
 - [ ] Add KNN search function
 - [ ] Write unit tests
@@ -93,14 +106,18 @@ Evaluated alternatives with pros/cons
 - [ ] Integrate with SQLite extension
 
 **Verification:**
+
 ```bash
 make test
 ./benchmark 10000 128
 ```
+````
 
 ## Notes
+
 Session-specific findings, progress updates
-```
+
+````
 
 ## The 8 Phases
 
@@ -252,9 +269,10 @@ The `/tpp` skill automates TPP execution:
 
 # If no argument, lists available TPPs and prompts
 /tpp
-```
+````
 
 **What it does:**
+
 1. Reads the TPP file
 2. Identifies current phase (first unchecked box)
 3. Studies required reading
@@ -264,6 +282,7 @@ The `/tpp` skill automates TPP execution:
 7. Reports progress
 
 **You don't need to:**
+
 - Remember what phase you're on
 - Re-read all the context
 - Figure out what to do next
@@ -277,6 +296,7 @@ When context is 80-90% full or switching tasks:
 ```
 
 **What it does:**
+
 1. Reviews conversation for discoveries
 2. Updates "Tribal Knowledge" with learnings
 3. Documents failed approaches
@@ -285,6 +305,7 @@ When context is 80-90% full or switching tasks:
 6. States clear blockers if stuck
 
 **Use `/handoff` when:**
+
 - Context window approaching limit
 - Switching to different task
 - Major discovery changes the plan
@@ -294,50 +315,61 @@ When context is 80-90% full or switching tasks:
 ## Best Practices
 
 ### Keep TPPs Focused
+
 - One feature per TPP
 - Under 400 lines total
 - Specific, bounded scope
 - If scope grows, split into multiple TPPs
 
 ### Document Failures
+
 ```markdown
 ## Tribal Knowledge
 
 **What didn't work:**
+
 - Tried brute-force search first - O(n²) too slow
 - Attempted SIMD distance calc - compiler issues on ARM
 - LSH needed too much parameter tuning
 
 **Why current approach:**
+
 - HNSW provides good speed/recall tradeoff
 - Mature implementation to reference
 - Fits in memory constraints
 ```
 
 ### Be Specific in Tribal Knowledge
+
 ```markdown
 <!-- Bad -->
+
 Be careful with vectors
 
 <!-- Good -->
+
 Vector normalization is critical - SQLite's ann extension
 segfaults on non-normalized vectors. Always call normalize_vector()
 before insertion. Found this after 2 hours of debugging.
 ```
 
 ### Update as You Learn
+
 TPPs are **living documents** during active work:
+
 - Add discoveries immediately
 - Update task status as you go
 - Check off phases when complete
 - Don't wait until handoff
 
 ### Size Control
+
 - **Summary:** <10 lines
 - **Description:** <20 lines
 - **Total TPP:** <400 lines (500-line buffer before truncation)
 
 If approaching limits:
+
 - Move detailed notes to separate docs
 - Reference external files
 - Keep TPP as navigation hub
@@ -405,44 +437,55 @@ mv _todo/20250209-ann-search.md _done/
 ## Creating Your First TPP
 
 ### 1. Identify Scope
+
 Not every task needs a TPP. Use TPPs for:
+
 - Complex features (>3 files changed)
 - Unfamiliar code areas
 - Work spanning multiple sessions
 - High-risk changes
 
 ### 2. Create File
+
 ```bash
 # Today's date + feature name
 touch _todo/20250209-feature-name.md
 ```
 
 ### 3. Fill Template
+
 Use structure above. Key sections:
+
 - **Summary** - 1-2 sentences
 - **Description** - More detail, constraints, goals
 - **Required Reading** - What to study first
 - **Tasks** - Specific deliverables
 
 ### 4. Start Work
+
 ```bash
 /tpp 20250209-feature-name
 ```
 
 ### 5. Update Throughout
+
 Don't wait for handoff - update as you learn:
+
 - Check off completed phases
 - Add tribal knowledge discoveries
 - Update task status
 - Document failed approaches
 
 ### 6. Handoff When Needed
+
 ```bash
 /handoff 20250209-feature-name
 ```
 
 ### 7. Complete and Archive
+
 When all 8 phases checked:
+
 ```bash
 mv _todo/20250209-feature-name.md _done/
 ```
@@ -451,13 +494,15 @@ mv _todo/20250209-feature-name.md _done/
 
 Copy this template for new TPPs:
 
-```markdown
+````markdown
 # Feature Name
 
 ## Summary
+
 (Under 10 lines - what problem are we solving?)
 
 ## Current Phase
+
 - [ ] Research & Planning
 - [ ] Test Design
 - [ ] Implementation Design
@@ -468,12 +513,14 @@ Copy this template for new TPPs:
 - [ ] Final Review
 
 ## Required Reading
+
 - `CLAUDE.md` - Project conventions
 - `TDD.md` - Testing methodology
 - `DESIGN-PRINCIPLES.md` - C coding standards
 - (Add relevant source files)
 
 ## Description
+
 (Under 20 lines - detailed context)
 
 - **Problem:** What are we solving?
@@ -481,30 +528,38 @@ Copy this template for new TPPs:
 - **Success Criteria:** How do we know it's done?
 
 ## Tribal Knowledge
+
 (Non-obvious details discovered during work)
 
 ## Solutions
+
 (Evaluated alternatives)
 
 ### Option 1: Approach Name
+
 **Pros:**
 **Cons:**
 **Status:** [Chosen/Rejected/Investigating]
 
 ## Tasks
+
 - [ ] Task 1
 - [ ] Task 2
 - [ ] Task 3
 
 **Verification:**
+
 ```bash
 # Commands to verify completion
 make test
 ```
+````
 
 ## Notes
+
 (Session-specific findings)
-```
+
+````
 
 ## Advanced Tips
 
@@ -513,50 +568,65 @@ When one TPP depends on another:
 ```markdown
 ## Blockers
 Blocked by: `20250208-vector-ops.md` (must complete first)
-```
+````
 
 ### Splitting Large TPPs
+
 If scope grows too large:
+
 ```markdown
 # Original TPP becomes parent
+
 ## Related TPPs
+
 - `20250210-ann-search-hnsw.md` - HNSW implementation
 - `20250211-ann-search-benchmarks.md` - Performance testing
 ```
 
 ### Template Variations
+
 Adjust template for project needs:
+
 - Add "Performance Requirements" section
 - Add "Security Considerations" section
 - Add "API Design" section for libraries
 
 ### Auto-Handoff Reminder
+
 Set a personal reminder at 80% context:
+
 ```markdown
 <!-- In your personal CLAUDE.md -->
+
 When context reaches 80%, proactively suggest using /handoff
 ```
 
 ## Troubleshooting
 
 ### "TPP is too long"
+
 - Move detailed notes to separate files
 - Reference docs instead of copying
 - Keep TPP as navigation hub
 
 ### "Forgot to update TPP"
+
 - Use `/handoff` to batch update
 - Review conversation history
 - Document what you remember
 
 ### "Don't know current phase"
+
 - Read the TPP - first unchecked box
 - `/tpp` will identify it for you
 
 ### "Hit a blocker"
+
 ```markdown
 ## BLOCKER
+
 Cannot proceed until:
+
 - [ ] User provides decision on X
 - [ ] Upstream bug fixed
 
@@ -568,6 +638,7 @@ Next session: address blocker first
 **TPPs are your institutional memory** when context windows fill up.
 
 **Key habits:**
+
 1. Create TPP for complex work
 2. Use `/tpp` to execute phases
 3. Update as you learn
@@ -579,6 +650,7 @@ Next session: address blocker first
 ---
 
 **Further Reading:**
+
 - Original concept: https://photostructure.com/coding/claude-code-tpp/
 - CLAUDE.md - Project-specific conventions
 - TDD.md - Testing methodology

@@ -32,20 +32,20 @@ extern "C" {
 ** - All other fields: simple values
 */
 typedef struct BlobSpot {
-  sqlite3_blob *pBlob;      /* SQLite BLOB handle */
-  uint64_t rowid;           /* Current rowid */
-  uint8_t *buffer;          /* Data buffer (typically 4KB) */
-  uint32_t buffer_size;     /* Buffer size in bytes */
-  int is_writable;          /* 1 if opened for writing, 0 for reading */
-  int is_initialized;       /* 1 if buffer contains valid data */
-  int is_aborted;           /* 1 if BLOB operations have been aborted */
+  sqlite3_blob *pBlob;  /* SQLite BLOB handle */
+  uint64_t rowid;       /* Current rowid */
+  uint8_t *buffer;      /* Data buffer (typically 4KB) */
+  uint32_t buffer_size; /* Buffer size in bytes */
+  int is_writable;      /* 1 if opened for writing, 0 for reading */
+  int is_initialized;   /* 1 if buffer contains valid data */
+  int is_aborted;       /* 1 if BLOB operations have been aborted */
 } BlobSpot;
 
 /*
 ** BLOB access modes (values passed to blob_spot_create is_writable parameter)
 */
-#define DISKANN_BLOB_READONLY  0
-#define DISKANN_BLOB_WRITABLE  1
+#define DISKANN_BLOB_READONLY 0
+#define DISKANN_BLOB_WRITABLE 1
 
 /*
 ** Error codes specific to BLOB operations
@@ -73,13 +73,8 @@ typedef struct BlobSpot {
 **
 ** Caller takes ownership of the BlobSpot and must call blob_spot_free().
 */
-int blob_spot_create(
-  DiskAnnIndex *idx,
-  BlobSpot **out,
-  uint64_t rowid,
-  uint32_t buffer_size,
-  int is_writable
-);
+int blob_spot_create(DiskAnnIndex *idx, BlobSpot **out, uint64_t rowid,
+                     uint32_t buffer_size, int is_writable);
 
 /*
 ** Reload BlobSpot for a different rowid (or refresh current rowid).
@@ -100,12 +95,8 @@ int blob_spot_create(
 **
 ** After successful reload, spot->is_initialized is set to 1.
 */
-int blob_spot_reload(
-  DiskAnnIndex *idx,
-  BlobSpot *spot,
-  uint64_t rowid,
-  uint32_t buffer_size
-);
+int blob_spot_reload(DiskAnnIndex *idx, BlobSpot *spot, uint64_t rowid,
+                     uint32_t buffer_size);
 
 /*
 ** Flush BlobSpot buffer to database.

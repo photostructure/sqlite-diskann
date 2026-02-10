@@ -5,8 +5,8 @@
 ** Copyright 2025 PhotoStructure Inc.
 ** MIT License
 */
-#include "unity/unity.h"
 #include "../../src/diskann_node.h"
+#include "unity/unity.h"
 #include <math.h>
 #include <sqlite3.h>
 #include <stdlib.h>
@@ -113,8 +113,8 @@ void test_max_edges_4d_large_block(void) {
 
 void test_metadata_offset_3d(void) {
   /* With 3D, 256 block, 8 max edges:
-   * metadata_offset = 16 (nodeMetadata) + 12 (nodeVector) + 8 * 12 (edgeVectors)
-   *                 = 16 + 12 + 96 = 124 */
+   * metadata_offset = 16 (nodeMetadata) + 12 (nodeVector) + 8 * 12
+   * (edgeVectors) = 16 + 12 + 96 = 124 */
   DiskAnnIndex idx = make_test_index(3, 256);
   uint32_t offset = node_edges_metadata_offset(&idx);
   TEST_ASSERT_EQUAL_UINT32(124, offset);

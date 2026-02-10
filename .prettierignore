@@ -12,6 +12,8 @@ vendor/
 compile_commands.json
 coverage/
 
-# C source (use clang-format instead)
+# C source and tooling (use clang-format instead)
 *.c
 *.h
+.clang-tidy
+.clang-format
