@@ -6,6 +6,79 @@
  */
 
 /**
+ * Minimal statement interface compatible with node:sqlite, better-sqlite3, and @photostructure/sqlite
+ */
+export interface StatementLike {
+  /**
+   * Execute statement and return info about changes
+   */
+  run(...params: unknown[]): {
+    changes: number;
+    lastInsertRowid: number | bigint;
+  };
+
+  /**
+   * Execute query and return all results
+   */
+  all(...params: unknown[]): unknown[];
+}
+
+/**
+ * Minimal database interface compatible with multiple SQLite implementations.
+ *
+ * Compatible libraries:
+ * - node:sqlite DatabaseSync (Node 22+)
+ * - better-sqlite3 Database
+ * - @photostructure/sqlite DatabaseSync
+ *
+ * This interface defines only the methods actually used by sqlite-diskann.
+ * Any SQLite library providing these methods can be used.
+ *
+ * @example
+ * ```typescript
+ * // Node 22+ built-in
+ * import { DatabaseSync } from 'node:sqlite';
+ * const db = new DatabaseSync(':memory:');
+ *
+ * // better-sqlite3
+ * import Database from 'better-sqlite3';
+ * const db = new Database(':memory:');
+ *
+ * // @photostructure/sqlite
+ * import { DatabaseSync } from '@photostructure/sqlite';
+ * const db = new DatabaseSync(':memory:');
+ *
+ * // All work with sqlite-diskann
+ * loadDiskAnnExtension(db);
+ * ```
+ */
+export interface DatabaseLike {
+  /**
+   * Load a SQLite extension from a file path
+   *
+   * @param path - Absolute path to the extension file (.so, .dylib, .dll)
+   * @param entryPoint - Optional entry point function name (default: sqlite3_extension_init)
+   */
+  loadExtension(path: string, entryPoint?: string): void;
+
+  /**
+   * Execute one or more SQL statements without returning results
+   * Used for DDL (CREATE TABLE, etc.) and DML without result rows
+   *
+   * @param sql - SQL statement(s) to execute
+   */
+  exec(sql: string): void;
+
+  /**
+   * Compile a SQL statement into a prepared statement
+   *
+   * @param sql - SQL statement with optional placeholders (?)
+   * @returns Prepared statement object
+   */
+  prepare(sql: string): StatementLike;
+}
+
+/**
  * Distance metrics supported by DiskANN
  */
 export type DistanceMetric = "cosine" | "euclidean" | "dot";

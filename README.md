@@ -18,19 +18,50 @@ A standalone SQLite extension implementing the [DiskANN algorithm](https://githu
 - Incremental insert/delete support
 - Cross-platform: Linux, macOS, Windows (x64, arm64)
 
+## Database Compatibility
+
+This package works with multiple SQLite library implementations through duck typing:
+
+| Library                    | Availability           | Notes                                    |
+| -------------------------- | ---------------------- | ---------------------------------------- |
+| **@photostructure/sqlite** | npm package            | ✅ Stable, 100% `node:sqlite` compatible |
+| **better-sqlite3**         | npm package            | ✅ Mature, stable, widely used           |
+| **node:sqlite**            | Node.js 22.5+ built-in | ⚠️ Experimental (requires flag)          |
+
+### Which should I use?
+
+- **Production**: Use `better-sqlite3` or `@photostructure/sqlite` (both stable)
+- **Node 22.5+**: Can use built-in `node:sqlite` (zero dependencies, but experimental)
+- **Existing projects**: Continue using whatever you already have
+
 ## Installation
 
 ```bash
+# Install sqlite-diskann
 npm install @photostructure/sqlite-diskann
+
+# Install a SQLite library (choose one):
+
+# Option 1: @photostructure/sqlite (recommended for production)
+npm install @photostructure/sqlite
+
+# Option 2: better-sqlite3 (recommended for production)
+npm install better-sqlite3
+
+# Option 3: Use Node.js 22.5+ built-in (no install needed)
+# Requires Node.js >= 22.5.0 and --experimental-sqlite flag
+# ⚠️ Still experimental (requires --experimental-sqlite flag)
 ```
 
 ## Quick Start
 
+### With @photostructure/sqlite
+
 ```typescript
-import Database from "@photostructure/sqlite";
+import { DatabaseSync } from "@photostructure/sqlite";
 import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
 
-const db = new Database(":memory:");
+const db = new DatabaseSync(":memory:", { allowExtension: true });
 loadDiskAnnExtension(db);
 
 // Create index for 128-dimensional vectors
@@ -51,6 +82,42 @@ const results = db
 `
   )
   .all(vector);
+```
+
+### With better-sqlite3
+
+```typescript
+import Database from "better-sqlite3";
+import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
+
+const db = new Database(":memory:");
+loadDiskAnnExtension(db);
+
+// Now you can use DiskANN functions
+db.exec(`
+  CREATE VIRTUAL TABLE embeddings USING diskann(
+    dimension=512,
+    metric=cosine
+  )
+`);
+```
+
+### With node:sqlite (Node 22.5+, experimental)
+
+```typescript
+import { DatabaseSync } from "node:sqlite";
+import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
+
+const db = new DatabaseSync(":memory:", { allowExtension: true });
+loadDiskAnnExtension(db);
+
+// Now you can use DiskANN functions
+db.exec(`
+  CREATE VIRTUAL TABLE embeddings USING diskann(
+    dimension=512,
+    metric=cosine
+  )
+`);
 ```
 
 ## Why DiskANN?
@@ -104,7 +171,8 @@ sudo apt-get install build-essential clang-tidy valgrind
 make all
 
 # Test
-make test        # C unit tests
+make test        # C unit tests (126 tests)
+make test-stress # Stress tests (300k/100k vectors, ~30 min)
 make asan        # AddressSanitizer
 make valgrind    # Memory leak detection
 npm test         # TypeScript tests

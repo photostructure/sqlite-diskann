@@ -7,14 +7,14 @@
  * MIT License (see LICENSE file)
  */
 
-import type { DatabaseSyncInstance } from "@photostructure/sqlite";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DiskAnnIndexOptions, NearestNeighborResult } from "./types.js";
-
-// Type alias for convenience
-type DatabaseSync = DatabaseSyncInstance;
+import type {
+  DatabaseLike,
+  DiskAnnIndexOptions,
+  NearestNeighborResult,
+} from "./types.js";
 
 /**
  * Maximum allowed length for SQL identifiers (table names, column names)
@@ -44,15 +44,22 @@ function isValidIdentifier(name: string): boolean {
 
 // Re-export types for convenience
 export type {
+  DatabaseLike,
   DiskAnnIndexOptions,
   DistanceMetric,
   NearestNeighborResult,
   // SearchOptions currently unused but exported for future API enhancements
   SearchOptions,
+  StatementLike,
 } from "./types.js";
 
 /**
- * Get the path to the native DiskANN extension for the current platform
+ * Get the path to the native DiskANN extension for the current platform.
+ *
+ * Returns the full file path including extension (e.g., `/path/to/diskann.so`).
+ * If calling `db.loadExtension()` directly, strip the file extension first —
+ * SQLite's `sqlite3_load_extension` auto-appends platform suffixes.
+ * Or use {@link loadDiskAnnExtension} which handles this automatically.
  */
 export function getExtensionPath(): string {
   const platform = process.platform;
@@ -86,12 +93,12 @@ export function getExtensionPath(): string {
 /**
  * Load the DiskANN extension into a SQLite database
  *
- * @param db - DatabaseSync instance from @photostructure/sqlite
+ * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @throws {Error} If extension fails to load
  *
  * @example
  * ```ts
- * import { DatabaseSync } from "@photostructure/sqlite";
+ * import { DatabaseSync } from "@photostructure/sqlite"; // or node:sqlite, or better-sqlite3
  * import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
  *
  * const db = new DatabaseSync(":memory:");
@@ -106,15 +113,22 @@ export function getExtensionPath(): string {
  * `);
  * ```
  */
-export function loadDiskAnnExtension(db: DatabaseSync): void {
-  const extPath = getExtensionPath();
+export function loadDiskAnnExtension(db: DatabaseLike): void {
+  const fullPath = getExtensionPath();
+
+  // Strip the file extension (.so/.dylib/.dll) before passing to loadExtension.
+  // SQLite's sqlite3_load_extension auto-appends platform suffixes, so passing
+  // the extensionless path works consistently across all implementations
+  // (node:sqlite, better-sqlite3, @photostructure/sqlite).
+  const extPath = fullPath.replace(/\.(so|dylib|dll)$/, "");
+
   db.loadExtension(extPath);
 }
 
 /**
  * Helper to create DiskANN virtual table with proper SQL escaping
  *
- * @param db - DatabaseSync instance
+ * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name for the virtual table
  * @param options - Index configuration
  *
@@ -128,7 +142,7 @@ export function loadDiskAnnExtension(db: DatabaseSync): void {
  * ```
  */
 export function createDiskAnnIndex(
-  db: DatabaseSync,
+  db: DatabaseLike,
   tableName: string,
   options: DiskAnnIndexOptions
 ): void {
@@ -176,7 +190,7 @@ export function createDiskAnnIndex(
 /**
  * Search for k nearest neighbors in a DiskANN index
  *
- * @param db - DatabaseSync instance
+ * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name of the DiskANN virtual table
  * @param queryVector - Query vector (must match index dimension)
  * @param k - Number of neighbors to return (default: 10)
@@ -193,7 +207,7 @@ export function createDiskAnnIndex(
  * ```
  */
 export function searchNearest(
-  db: DatabaseSync,
+  db: DatabaseLike,
   tableName: string,
   queryVector: number[],
   k = 10,
@@ -243,7 +257,7 @@ export function searchNearest(
 /**
  * Insert a vector into a DiskANN index
  *
- * @param db - DatabaseSync instance
+ * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name of the DiskANN virtual table
  * @param id - Unique identifier for this vector
  * @param vector - Vector to insert (must match index dimension)
@@ -254,7 +268,7 @@ export function searchNearest(
  * ```
  */
 export function insertVector(
-  db: DatabaseSync,
+  db: DatabaseLike,
   tableName: string,
   id: number,
   vector: number[]
@@ -279,11 +293,11 @@ export function insertVector(
 /**
  * Delete a vector from a DiskANN index
  *
- * @param db - DatabaseSync instance
+ * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name of the DiskANN virtual table
  * @param id - ID of vector to delete
  */
-export function deleteVector(db: DatabaseSync, tableName: string, id: number): void {
+export function deleteVector(db: DatabaseLike, tableName: string, id: number): void {
   // Validate table name to prevent SQL injection
   if (!isValidIdentifier(tableName)) {
     throw new Error(
