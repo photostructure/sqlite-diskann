@@ -38,14 +38,14 @@ extern "C" {
 /*
 ** Error codes
 */
-#define DISKANN_OK               0
-#define DISKANN_ERROR           -1
-#define DISKANN_ERROR_NOMEM     -2
-#define DISKANN_ERROR_NOTFOUND  -3
-#define DISKANN_ERROR_INVALID   -4
-#define DISKANN_ERROR_DIMENSION -5
-#define DISKANN_ERROR_IO        -6
-#define DISKANN_ERROR_EXISTS    -7
+#define DISKANN_OK                0
+#define DISKANN_ERROR           (-1)
+#define DISKANN_ERROR_NOMEM     (-2)
+#define DISKANN_ERROR_NOTFOUND  (-3)
+#define DISKANN_ERROR_INVALID   (-4)
+#define DISKANN_ERROR_DIMENSION (-5)
+#define DISKANN_ERROR_IO        (-6)
+#define DISKANN_ERROR_EXISTS    (-7)
 
 /*
 ** Distance metrics

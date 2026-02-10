@@ -70,18 +70,18 @@ void node_bin_edge(const DiskAnnIndex *idx, const BlobSpot *spot, int edge_idx,
                (uint32_t)(edge_idx + 1) * EDGE_METADATA_SIZE <=
            spot->buffer_size);
     *rowid = read_le64(spot->buffer + meta_offset +
-                       (uint32_t)edge_idx * EDGE_METADATA_SIZE +
+                       (size_t)edge_idx * EDGE_METADATA_SIZE +
                        sizeof(uint64_t));
   }
   if (distance != NULL) {
     uint32_t raw = read_le32(spot->buffer + meta_offset +
-                             (uint32_t)edge_idx * EDGE_METADATA_SIZE +
+                             (size_t)edge_idx * EDGE_METADATA_SIZE +
                              sizeof(uint32_t));
     memcpy(distance, &raw, sizeof(float));
   }
   if (vector != NULL) {
     uint32_t vec_offset = NODE_METADATA_SIZE + idx->nNodeVectorSize +
-                          (uint32_t)edge_idx * idx->nEdgeVectorSize;
+                          (uint32_t)edge_idx * (uint32_t)idx->nEdgeVectorSize;
     assert(vec_offset + idx->nEdgeVectorSize <= meta_offset);
     *vector = (const float *)(spot->buffer + vec_offset);
   }
@@ -234,14 +234,17 @@ void buffer_insert(uint8_t *buf, int size, int max_size, int insert_idx,
 
   if (size == max_size) {
     if (last != NULL) {
-      memcpy(last, buf + (size - 1) * item_size, (size_t)item_size);
+      memcpy(last, buf + (size_t)(size - 1) * (size_t)item_size,
+             (size_t)item_size);
     }
     size--;
   }
   int items_to_move = size - insert_idx;
-  memmove(buf + (insert_idx + 1) * item_size, buf + insert_idx * item_size,
+  memmove(buf + (size_t)(insert_idx + 1) * (size_t)item_size,
+          buf + (size_t)insert_idx * (size_t)item_size,
           (size_t)items_to_move * (size_t)item_size);
-  memcpy(buf + insert_idx * item_size, item, (size_t)item_size);
+  memcpy(buf + (size_t)insert_idx * (size_t)item_size, item,
+         (size_t)item_size);
 }
 
 void buffer_delete(uint8_t *buf, int size, int delete_idx, int item_size) {
@@ -249,7 +252,8 @@ void buffer_delete(uint8_t *buf, int size, int delete_idx, int item_size) {
   assert(0 <= delete_idx && delete_idx < size);
 
   int items_to_move = size - delete_idx - 1;
-  memmove(buf + delete_idx * item_size, buf + (delete_idx + 1) * item_size,
+  memmove(buf + (size_t)delete_idx * (size_t)item_size,
+          buf + (size_t)(delete_idx + 1) * (size_t)item_size,
           (size_t)items_to_move * (size_t)item_size);
 }
 

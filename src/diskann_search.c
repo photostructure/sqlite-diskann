@@ -371,9 +371,8 @@ out:
 int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
                    DiskAnnResult *results) {
   DiskAnnSearchCtx ctx;
-  uint64_t start_rowid;
+  uint64_t start_rowid = 0;
   int rc;
-  int ctx_initialized = 0;
 
   /* Validate inputs */
   if (!idx) return DISKANN_ERROR_INVALID;
@@ -399,8 +398,6 @@ int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
   if (rc != DISKANN_OK) {
     return rc;
   }
-  ctx_initialized = 1;
-
   /* Run beam search */
   rc = diskann_search_internal(idx, &ctx, start_rowid);
   if (rc != DISKANN_OK) {
@@ -415,9 +412,7 @@ int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
     results[i].distance = ctx.top_distances[i];
   }
 
-  if (ctx_initialized) {
-    diskann_search_ctx_deinit(&ctx);
-  }
+  diskann_search_ctx_deinit(&ctx);
 
   return n_results;
 }

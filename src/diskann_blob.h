@@ -50,7 +50,7 @@ typedef struct BlobSpot {
 /*
 ** Error codes specific to BLOB operations
 */
-#define DISKANN_ROW_NOT_FOUND -100  /* Row doesn't exist in shadow table */
+#define DISKANN_ROW_NOT_FOUND (-100) /* Row doesn't exist in shadow table */
 
 /*
 ** Create a new BlobSpot for the specified rowid.

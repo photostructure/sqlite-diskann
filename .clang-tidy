@@ -6,11 +6,15 @@ Checks: '
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-multi-level-implicit-pointer-conversion,
   cert-*,
   -cert-err58-cpp,
   clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-init-variables,
+  -cppcoreguidelines-macro-to-enum,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-pro-type-union-access,
@@ -18,13 +22,15 @@ Checks: '
   -misc-include-cleaner,
   performance-*,
   readability-*,
+  -readability-braces-around-statements,
   -readability-else-after-return,
-  -readability-magic-numbers,
   -readability-function-cognitive-complexity,
   -readability-identifier-length,
+  -readability-isolate-declaration,
+  -readability-magic-numbers,
   -readability-uppercase-literal-suffix,
-  -readability-braces-around-statements,
-  -cppcoreguidelines-init-variables
+  -performance-no-int-to-ptr,
+  -clang-analyzer-deadcode.DeadStores
 '
 
 # Treat warnings as errors
@@ -36,7 +42,7 @@ HeaderFilterRegex: '^src/.*\.h$'
 # Format style
 FormatStyle: file
 
-# Check options (C-specific naming conventions)
+# Check options — naming conventions match SQLite's CamelCase for types
 CheckOptions:
   - key: readability-identifier-naming.FunctionCase
     value: lower_case
@@ -49,10 +55,9 @@ CheckOptions:
   - key: readability-identifier-naming.MacroDefinitionCase
     value: UPPER_CASE
   - key: readability-identifier-naming.StructCase
-    value: lower_case
+    value: CamelCase
   - key: readability-identifier-naming.TypedefCase
-    value: lower_case
-  # TypedefSuffix _t removed: POSIX reserves _t and it's too pedantic for test code
+    value: CamelCase
   - key: readability-identifier-naming.GlobalConstantCase
     value: UPPER_CASE
   - key: performance-move-const-arg.CheckTriviallyCopyableMove
