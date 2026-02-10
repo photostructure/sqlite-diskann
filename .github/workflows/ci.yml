@@ -201,6 +201,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run prepare-release
+
       - name: Bump version (if requested)
         if: ${{ github.event.inputs.version != 'current' }}
         run: |

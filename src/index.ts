@@ -8,6 +8,7 @@
  */
 
 import type { DatabaseSyncInstance } from "@photostructure/sqlite";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DiskAnnIndexOptions, NearestNeighborResult } from "./types.js";
@@ -55,20 +56,31 @@ export type {
  */
 export function getExtensionPath(): string {
   const platform = process.platform;
+  const arch = process.arch;
   const ext = platform === "win32" ? "dll" : platform === "darwin" ? "dylib" : "so";
 
-  // In production (installed from npm), binaries are in build/ relative to package root
-  // During development, they're in build/ relative to project root
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
 
-  // Try to find the build directory
   // If we're in dist/, go up to package root
   const packageRoot = __dirname.endsWith("/dist")
     ? join(__dirname, "..")
     : join(__dirname, "..");
 
-  return join(packageRoot, "build", `diskann.${ext}`);
+  // Map Node.js platform/arch to our prebuild directory names
+  const platformArch = `${platform}-${arch}`;
+
+  // In production (installed from npm), binaries are in prebuilds/{platform}-{arch}/
+  // During development, they're in build/
+  const productionPath = join(packageRoot, "prebuilds", platformArch, `diskann.${ext}`);
+  const devPath = join(packageRoot, "build", `diskann.${ext}`);
+
+  // Check if production prebuild exists, otherwise fall back to dev build
+  if (existsSync(productionPath)) {
+    return productionPath;
+  }
+
+  return devPath;
 }
 
 /**

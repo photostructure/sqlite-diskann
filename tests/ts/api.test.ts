@@ -21,7 +21,9 @@ describe("TypeScript API", () => {
     it("returns platform-specific extension path", () => {
       const path = getExtensionPath();
       expect(path).toBeDefined();
-      expect(path).toContain("build/diskann");
+
+      // Should contain either dev path (build/) or production path (prebuilds/)
+      expect(path).toMatch(/(?:build|prebuilds)\/.*diskann/);
 
       // Platform-specific extension
       if (process.platform === "win32") {
