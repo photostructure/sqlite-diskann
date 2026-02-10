@@ -41,6 +41,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build and run tests
         run: make test
+      - name: Build extension
+        run: make all
       - name: Stage prebuild
         run: |
           mkdir -p prebuilds/linux-x64
@@ -56,6 +58,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build and run tests
         run: make test
+      - name: Build extension
+        run: make all
       - name: Stage prebuild
         run: |
           mkdir -p prebuilds/linux-arm64
@@ -72,6 +76,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build and run tests
         run: make test
+      - name: Build extension
+        run: make all
       - name: Stage prebuild
         run: |
           mkdir -p prebuilds/darwin-arm64
@@ -88,6 +94,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build and run tests
         run: make test
+      - name: Build extension
+        run: make all
       - name: Stage prebuild
         run: |
           mkdir -p prebuilds/darwin-x64
