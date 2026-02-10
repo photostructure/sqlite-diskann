@@ -49,9 +49,10 @@ cl.exe /std:c17 /O2 /nologo /W0 /DSQLITE_OMIT_LOAD_EXTENSION /c /Fo"$BuildDir/sq
 if ($LASTEXITCODE -ne 0) { throw "SQLite compilation failed" }
 
 if ($Target -eq "extension") {
-    # Build shared library (DLL)
+    # Build shared library (DLL) with vendored SQLite linked in.
+    # SQLite extensions on Windows must resolve SQLite symbols at link time.
     Write-Host "Building diskann.dll..."
-    cl.exe @CommonFlags /LD /Fe"$BuildDir/diskann.dll" @Sources
+    cl.exe @CommonFlags /LD /Fe"$BuildDir/diskann.dll" @Sources "$BuildDir/sqlite3.obj"
     if ($LASTEXITCODE -ne 0) { throw "Extension build failed" }
     Write-Host "Built: $BuildDir/diskann.dll"
 }
