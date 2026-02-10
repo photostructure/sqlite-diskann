@@ -620,7 +620,7 @@ void test_search_brute_force_recall(void) {
   TEST_ASSERT_NOT_NULL(idx);
 
   const int N = 50;
-  const int K = 5;
+#define RECALL_K 5
 
   /* Generate deterministic "random" vectors using a simple LCG */
   float vectors[50][TEST_DIMS];
@@ -656,20 +656,21 @@ void test_search_brute_force_recall(void) {
   float query[TEST_DIMS] = {0.5f, 0.5f, 0.5f};
 
   /* Brute force reference */
-  int64_t bf_ids[K];
-  float bf_distances[K];
+  int64_t bf_ids[RECALL_K];
+  float bf_distances[RECALL_K];
   brute_force_knn((const float *)vectors, N, TEST_DIMS,
-                  DISKANN_METRIC_EUCLIDEAN, query, K, bf_ids, bf_distances);
+                  DISKANN_METRIC_EUCLIDEAN, query, RECALL_K, bf_ids,
+                  bf_distances);
 
   /* ANN search */
-  DiskAnnResult ann_results[K];
-  rc = diskann_search(idx, query, TEST_DIMS, K, ann_results);
-  TEST_ASSERT_EQUAL(K, rc);
+  DiskAnnResult ann_results[RECALL_K];
+  rc = diskann_search(idx, query, TEST_DIMS, RECALL_K, ann_results);
+  TEST_ASSERT_EQUAL(RECALL_K, rc);
 
   /* Check recall: count how many of the true top-K are in the ANN results */
   int recall = 0;
-  for (int i = 0; i < K; i++) {
-    for (int j = 0; j < K; j++) {
+  for (int i = 0; i < RECALL_K; i++) {
+    for (int j = 0; j < RECALL_K; j++) {
       if (ann_results[j].id == bf_ids[i]) {
         recall++;
         break;
@@ -678,7 +679,7 @@ void test_search_brute_force_recall(void) {
   }
 
   /* On a 50-vector graph with max 8 edges, recall should be very high */
-  float recall_rate = (float)recall / (float)K;
+  float recall_rate = (float)recall / (float)RECALL_K;
   TEST_ASSERT_TRUE_MESSAGE(recall_rate >= 0.8f,
                            "Recall too low — search may be broken");
 
