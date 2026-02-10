@@ -163,6 +163,12 @@ extern void test_insert_recall(void);
 extern void test_insert_delete_search(void);
 extern void test_insert_cosine_metric(void);
 
+/* Integration tests */
+extern void test_integration_reopen_persistence(void);
+extern void test_integration_clear_reinsert(void);
+extern void test_integration_recall_128d(void);
+extern void test_integration_delete_at_scale(void);
+
 void setUp(void) { /* Global setup if needed */ }
 
 void tearDown(void) { /* Global teardown if needed */ }
@@ -335,6 +341,12 @@ int main(void) {
   RUN_TEST(test_insert_recall);
   RUN_TEST(test_insert_delete_search);
   RUN_TEST(test_insert_cosine_metric);
+
+  /* Integration tests */
+  RUN_TEST(test_integration_reopen_persistence);
+  RUN_TEST(test_integration_clear_reinsert);
+  RUN_TEST(test_integration_recall_128d);
+  RUN_TEST(test_integration_delete_at_scale);
 
   return UNITY_END();
 }
