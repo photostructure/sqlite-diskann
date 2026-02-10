@@ -21,6 +21,7 @@
 #define DEFAULT_SEARCH_LIST_SIZE 100
 #define DEFAULT_INSERT_LIST_SIZE 200
 #define DEFAULT_BLOCK_SIZE 4096
+#define DEFAULT_PRUNING_ALPHA 1.2
 
 /* Maximum allowed values */
 #define MAX_DIMENSIONS 16384
@@ -225,6 +226,9 @@ int diskann_create_index(
   if (rc != DISKANN_OK) goto rollback;
   rc = store_metadata_int(db, db_name, index_name, "block_size", (int64_t)config->block_size);
   if (rc != DISKANN_OK) goto rollback;
+  /* Store pruning_alpha as fixed-point integer (×1000) for portability */
+  rc = store_metadata_int(db, db_name, index_name, "pruning_alpha_x1000", (int64_t)(DEFAULT_PRUNING_ALPHA * 1000.0));
+  if (rc != DISKANN_OK) goto rollback;
 
   /* Commit the savepoint */
   sql = sqlite3_mprintf("RELEASE diskann_create_%s", index_name);
@@ -368,6 +372,8 @@ int diskann_open_index(
       idx->insert_list_size = (uint32_t)value;
     } else if (strcmp(key, "block_size") == 0) {
       idx->block_size = (uint32_t)value;
+    } else if (strcmp(key, "pruning_alpha_x1000") == 0) {
+      idx->pruning_alpha = (double)value / 1000.0;
     }
   }
 
@@ -382,6 +388,15 @@ int diskann_open_index(
   if (idx->block_size == 0 || idx->block_size > MAX_BLOCK_SIZE) {
     rc = DISKANN_ERROR;
     goto cleanup;
+  }
+
+  /* Compute derived layout fields (float32-only: both sizes identical) */
+  idx->nNodeVectorSize = idx->dimensions * (uint32_t)sizeof(float);
+  idx->nEdgeVectorSize = idx->nNodeVectorSize;
+
+  /* Default pruning_alpha if not stored (backwards compat with old indexes) */
+  if (idx->pruning_alpha == 0.0) {
+    idx->pruning_alpha = DEFAULT_PRUNING_ALPHA;
   }
 
   /* Initialize statistics */

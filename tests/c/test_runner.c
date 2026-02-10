@@ -57,6 +57,59 @@ extern void test_blob_spot_flush(void);
 extern void test_blob_spot_flush_readonly(void);
 extern void test_blob_spot_create_null_output(void);
 
+/* LE serialization tests */
+extern void test_le16_roundtrip(void);
+extern void test_le32_roundtrip(void);
+extern void test_le64_roundtrip(void);
+extern void test_le16_zero(void);
+extern void test_le64_max(void);
+
+/* Layout calculation tests */
+extern void test_max_edges_3d_256block(void);
+extern void test_max_edges_768d_too_small(void);
+extern void test_max_edges_4d_large_block(void);
+extern void test_metadata_offset_3d(void);
+
+/* Node binary format tests */
+extern void test_node_bin_init_and_read_vector(void);
+extern void test_node_bin_add_and_read_edge(void);
+extern void test_node_bin_multiple_edges(void);
+extern void test_node_bin_edge_find_idx(void);
+extern void test_node_bin_delete_edge(void);
+extern void test_node_bin_delete_last_edge(void);
+extern void test_node_bin_prune_edges(void);
+extern void test_node_bin_replace_existing_edge(void);
+extern void test_node_bin_edge_null_outputs(void);
+
+/* Distance calculation tests */
+extern void test_distance_l2_orthogonal(void);
+extern void test_distance_l2_same(void);
+extern void test_distance_l2_known_value(void);
+extern void test_distance_cosine_orthogonal(void);
+extern void test_distance_cosine_same_direction(void);
+extern void test_distance_cosine_opposite(void);
+extern void test_distance_dispatch_l2(void);
+extern void test_distance_dispatch_cosine(void);
+
+/* Buffer management tests */
+extern void test_distance_buffer_insert_idx_empty(void);
+extern void test_distance_buffer_insert_idx_beginning(void);
+extern void test_distance_buffer_insert_idx_middle(void);
+extern void test_distance_buffer_insert_idx_end(void);
+extern void test_distance_buffer_insert_idx_full_rejected(void);
+extern void test_buffer_insert_basic(void);
+extern void test_buffer_insert_evicts_last(void);
+extern void test_buffer_delete_basic(void);
+extern void test_buffer_delete_first(void);
+extern void test_buffer_delete_last(void);
+
+/* Node alloc/free tests */
+extern void test_node_alloc_basic(void);
+extern void test_node_free_null(void);
+
+/* DiskAnnIndex derived fields tests */
+extern void test_open_index_computes_derived_fields(void);
+
 void setUp(void) {
     /* Global setup if needed */
 }
@@ -127,6 +180,59 @@ int main(void) {
     RUN_TEST(test_blob_spot_flush);
     RUN_TEST(test_blob_spot_flush_readonly);
     RUN_TEST(test_blob_spot_create_null_output);
+
+    /* LE serialization tests */
+    RUN_TEST(test_le16_roundtrip);
+    RUN_TEST(test_le32_roundtrip);
+    RUN_TEST(test_le64_roundtrip);
+    RUN_TEST(test_le16_zero);
+    RUN_TEST(test_le64_max);
+
+    /* Layout calculation tests */
+    RUN_TEST(test_max_edges_3d_256block);
+    RUN_TEST(test_max_edges_768d_too_small);
+    RUN_TEST(test_max_edges_4d_large_block);
+    RUN_TEST(test_metadata_offset_3d);
+
+    /* Node binary format tests */
+    RUN_TEST(test_node_bin_init_and_read_vector);
+    RUN_TEST(test_node_bin_add_and_read_edge);
+    RUN_TEST(test_node_bin_multiple_edges);
+    RUN_TEST(test_node_bin_edge_find_idx);
+    RUN_TEST(test_node_bin_delete_edge);
+    RUN_TEST(test_node_bin_delete_last_edge);
+    RUN_TEST(test_node_bin_prune_edges);
+    RUN_TEST(test_node_bin_replace_existing_edge);
+    RUN_TEST(test_node_bin_edge_null_outputs);
+
+    /* Distance calculation tests */
+    RUN_TEST(test_distance_l2_orthogonal);
+    RUN_TEST(test_distance_l2_same);
+    RUN_TEST(test_distance_l2_known_value);
+    RUN_TEST(test_distance_cosine_orthogonal);
+    RUN_TEST(test_distance_cosine_same_direction);
+    RUN_TEST(test_distance_cosine_opposite);
+    RUN_TEST(test_distance_dispatch_l2);
+    RUN_TEST(test_distance_dispatch_cosine);
+
+    /* Buffer management tests */
+    RUN_TEST(test_distance_buffer_insert_idx_empty);
+    RUN_TEST(test_distance_buffer_insert_idx_beginning);
+    RUN_TEST(test_distance_buffer_insert_idx_middle);
+    RUN_TEST(test_distance_buffer_insert_idx_end);
+    RUN_TEST(test_distance_buffer_insert_idx_full_rejected);
+    RUN_TEST(test_buffer_insert_basic);
+    RUN_TEST(test_buffer_insert_evicts_last);
+    RUN_TEST(test_buffer_delete_basic);
+    RUN_TEST(test_buffer_delete_first);
+    RUN_TEST(test_buffer_delete_last);
+
+    /* Node alloc/free tests */
+    RUN_TEST(test_node_alloc_basic);
+    RUN_TEST(test_node_free_null);
+
+    /* DiskAnnIndex derived fields tests */
+    RUN_TEST(test_open_index_computes_derived_fields);
 
     return UNITY_END();
 }

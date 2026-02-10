@@ -42,6 +42,11 @@ struct DiskAnnIndex {
   uint32_t search_list_size; /* Search beam width */
   uint32_t insert_list_size; /* Insert beam width */
   uint32_t block_size;      /* Node block size in bytes */
+  double pruning_alpha;     /* Edge pruning threshold (default 1.2) */
+
+  /* Derived layout fields (computed from config at open time) */
+  uint32_t nNodeVectorSize; /* dims * sizeof(float) for float32 */
+  uint32_t nEdgeVectorSize; /* Same as nNodeVectorSize for float32-only */
 
   /* Statistics (for debugging/profiling) */
   uint64_t num_reads;       /* Number of BLOB reads */

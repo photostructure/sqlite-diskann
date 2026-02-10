@@ -25,7 +25,7 @@ TEST_BIN = test_diskann
 
 # Source files
 # Note: diskann.c is the original libSQL code still being extracted - not included yet
-SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c
+SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_node.c
 TEST_C_SOURCES = $(filter-out %/test_runner.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
@@ -71,7 +71,7 @@ test-all: test-native
 	@command -v npm >/dev/null 2>&1 || { echo "Error: npm not installed" >&2; exit 1; }
 	npm run test:ts
 
-$(BUILD_DIR)/$(TEST_BIN): $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(TEST_C_SOURCES) $(TEST_RUNNER) $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
+$(BUILD_DIR)/$(TEST_BIN): $(SOURCES) $(TEST_C_SOURCES) $(TEST_RUNNER) $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
 	@echo "Built test suite: $@"
 
