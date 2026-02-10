@@ -18,10 +18,6 @@ A standalone SQLite extension implementing the [DiskANN algorithm](https://githu
 - Incremental insert/delete support
 - Cross-platform: Linux, macOS, Windows (x64, arm64)
 
-## Status
-
-✅ **Extraction complete** — All 8 DiskANN API functions extracted from libSQL. 126 tests (122 unit + 4 integration), ASan/Valgrind clean. Node.js/TypeScript bindings ready.
-
 ## Installation
 
 ```bash
