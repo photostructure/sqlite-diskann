@@ -1,7 +1,7 @@
 # sqlite-diskann Makefile
 # Cross-platform SQLite extension for DiskANN vector search
 
-.PHONY: all clean test test-native test-all check asan valgrind bear lint clang-tidy fmt help
+.PHONY: all clean test test-native test-all test-stress check asan valgrind bear lint clang-tidy fmt help
 
 # Compiler and flags
 CC ?= gcc
@@ -22,10 +22,11 @@ BUILD_DIR = build
 # Output
 EXTENSION = diskann.so
 TEST_BIN = test_diskann
+STRESS_BIN = test_stress
 
 # Source files
 SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c
-TEST_C_SOURCES = $(filter-out %/test_runner.c, $(wildcard $(TEST_DIR)/c/test_*.c))
+TEST_C_SOURCES = $(filter-out %/test_runner.c %/test_stress.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
 SQLITE_SOURCE = vendor/sqlite/sqlite3.c
@@ -34,10 +35,14 @@ SQLITE_SOURCE = vendor/sqlite/sqlite3.c
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     EXTENSION = diskann.dylib
+    # Allow undefined symbols (resolved at runtime when loaded into SQLite)
     LDFLAGS += -dynamiclib -undefined dynamic_lookup
 endif
 ifeq ($(UNAME_S),Linux)
     EXTENSION = diskann.so
+    # Allow undefined symbols (resolved at runtime when loaded into SQLite)
+    # Equivalent to macOS's -undefined dynamic_lookup
+    LDFLAGS += -Wl,--allow-shlib-undefined
 endif
 
 # Default target
@@ -69,6 +74,17 @@ test-all: test-native
 	@echo "Running TypeScript tests..."
 	@command -v npm >/dev/null 2>&1 || { echo "Error: npm not installed" >&2; exit 1; }
 	npm run test:ts
+
+# Build and run stress tests (separate from regular tests due to long runtime)
+test-stress: $(BUILD_DIR)/$(STRESS_BIN)
+	@echo "Running stress tests (this may take several minutes)..."
+	$(BUILD_DIR)/$(STRESS_BIN)
+	@echo "Cleaning up stress test database files..."
+	@rm -f /tmp/diskann_stress_*.db*
+
+$(BUILD_DIR)/$(STRESS_BIN): $(SOURCES) $(TEST_DIR)/c/test_stress.c $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
+	@echo "Built stress test suite: $@"
 
 $(BUILD_DIR)/$(TEST_BIN): $(SOURCES) $(TEST_C_SOURCES) $(TEST_RUNNER) $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
@@ -125,6 +141,7 @@ help:
 	@echo "  test         Build and run native C tests (alias for test-native)"
 	@echo "  test-native  Build and run native C tests only"
 	@echo "  test-all     Build and run both native C and TypeScript tests"
+	@echo "  test-stress  Build and run stress tests (300k/100k vectors, takes ~5-10min)"
 	@echo "  check        Alias for test"
 	@echo "  asan         Build and run with AddressSanitizer (fast memory checks)"
 	@echo "  valgrind     Build and run with Valgrind (thorough memory checks)"

@@ -45,7 +45,7 @@ temp/
 # Prettier cache
 .prettier-cache
 
-# Test databases
+# Test databases (includes stress test artifacts)
 *.db
 *.db-shm
 *.db-wal
