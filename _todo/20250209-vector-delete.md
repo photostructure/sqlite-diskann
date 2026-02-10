@@ -9,14 +9,14 @@ pointing to the deleted node, then deletes the shadow table row. Uses a conserva
 
 ## Current Phase
 
-- [ ] Research & Planning
-- [ ] Test Design
-- [ ] Implementation Design
-- [ ] Test-First Development
-- [ ] Implementation
-- [ ] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Research & Planning
+- [x] Test Design
+- [x] Implementation Design
+- [x] Test-First Development
+- [x] Implementation
+- [x] Integration
+- [x] Cleanup & Documentation
+- [x] Final Review
 
 ## Required Reading
 
@@ -102,23 +102,13 @@ functions live in diskann_api.c already.
 
 ## Tasks
 
-- [ ] Study `diskAnnDelete()` algorithm (lines 1626-1703)
-- [ ] Study `nodeBinDeleteEdge()` (lines 426-448) — swap-with-last pattern
-- [ ] Implement delete in `src/diskann_api.c`:
-  - Validate inputs (NULL idx, check index is open)
-  - Begin SAVEPOINT
-  - Load target node BLOB via `blob_spot_create()`
-  - If not found → rollback, return `DISKANN_ERROR_NOTFOUND`
-  - Read edge count with `nodeBinEdges()`
-  - For each edge:
-    - Read target rowid with `nodeBinEdge()`
-    - Load neighbor BLOB via `blob_spot_reload()` (or new create)
-    - Find back-edge with `nodeBinEdgeFindIdx()`
-    - If found: `nodeBinDeleteEdge()` + `blob_spot_flush()`
-  - Delete shadow table row: `DELETE FROM "{db}".{idx}_shadow WHERE id = ?`
-  - Release SAVEPOINT
-  - Return `DISKANN_OK`
-- [ ] Write tests in `tests/c/test_delete.c`:
+- [x] Study `diskAnnDelete()` algorithm (lines 1626-1703)
+- [x] Study `nodeBinDeleteEdge()` (lines 426-448) — swap-with-last pattern
+- [x] **Bug found in original libSQL code (line 1676):** `nodeBinEdgeFindIdx(pIndex,
+  pEdgeBlob, edgeRowid)` searches for the NEIGHBOR's own rowid instead of the deleted
+  node's rowid (`nodeRowid`). Back-edges were never actually cleaned up. Fixed in our
+  extraction.
+- [x] Write tests in `tests/c/test_delete.c` (TDD — tests first):
   - Delete NULL index → `DISKANN_ERROR_INVALID`
   - Delete from empty index → `DISKANN_ERROR_NOTFOUND`
   - Delete non-existent ID → `DISKANN_ERROR_NOTFOUND`
@@ -126,7 +116,25 @@ functions live in diskann_api.c already.
   - Delete node with edges → back-edges cleaned from neighbors
   - Delete last node → index empty but functional
   - Double delete → second returns `DISKANN_ERROR_NOTFOUND`
-- [ ] Wire into Makefile and test_runner.c
+  - Zombie edge (neighbor already deleted) → succeeds
+- [x] Wire into test_runner.c
+- [x] Implement delete in `src/diskann_api.c`:
+  - Validate inputs (NULL idx)
+  - Begin SAVEPOINT
+  - Load target node BLOB via `blob_spot_create()` (read-only)
+  - If not found → rollback, return `DISKANN_ERROR_NOTFOUND`
+  - Read edge count with `node_bin_edges()`
+  - If edges > 0, create writable BlobSpot for neighbor editing
+  - For each edge:
+    - Read neighbor rowid with `node_bin_edge()`
+    - Load neighbor BLOB via `blob_spot_reload()`
+    - If DISKANN_ROW_NOT_FOUND → continue (zombie edge)
+    - Find back-edge with `node_bin_edge_find_idx(idx, edge_blob, id)` ← FIXED
+    - If found: `node_bin_delete_edge()` + `blob_spot_flush()`
+  - Delete shadow table row: `DELETE FROM "%w".%s WHERE id = ?`
+  - Verify `sqlite3_changes() == 1`
+  - Release SAVEPOINT
+- [x] Verify: `make test` (8/8 delete tests pass), `make asan` (clean), `make valgrind` (clean)
 
 **Verification:**
 ```bash

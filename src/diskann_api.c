@@ -7,7 +7,9 @@
 ** MIT License
 */
 #include "diskann.h"
+#include "diskann_blob.h"
 #include "diskann_internal.h"
+#include "diskann_node.h"
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -476,13 +478,148 @@ int diskann_search(
   return DISKANN_ERROR; /* Not implemented yet */
 }
 
+/*
+** Delete a vector from the index.
+**
+** Algorithm (conservative — no graph repair):
+** 1. Load target node's BLOB to read its edge list
+** 2. For each neighbor edge: load neighbor, find back-edge to target, remove it
+** 3. Delete target row from shadow table
+** Wrapped in SAVEPOINT for atomicity (modifies N+1 rows).
+**
+** Note: The original libSQL diskAnnDelete() has a bug at line 1676 — it
+** searches for nodeBinEdgeFindIdx(neighbor, edgeRowid) where edgeRowid is
+** the NEIGHBOR's own rowid. This should be the deleted node's rowid. Our
+** implementation fixes this.
+*/
 int diskann_delete(
   DiskAnnIndex *idx,
   int64_t id
 ) {
-  (void)idx;
-  (void)id;
-  return DISKANN_ERROR; /* Not implemented yet */
+  BlobSpot *target_blob = NULL;
+  BlobSpot *edge_blob = NULL;
+  char *sql = NULL;
+  sqlite3_stmt *stmt = NULL;
+  int rc = DISKANN_OK;
+
+  /* Validate inputs */
+  if (!idx) return DISKANN_ERROR_INVALID;
+
+  /* Begin SAVEPOINT for atomicity */
+  sql = sqlite3_mprintf("SAVEPOINT diskann_delete_%s", idx->index_name);
+  if (!sql) return DISKANN_ERROR_NOMEM;
+  rc = sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
+  sqlite3_free(sql);
+  sql = NULL;
+  if (rc != SQLITE_OK) return DISKANN_ERROR;
+
+  /* Open read-only BlobSpot for target node */
+  rc = blob_spot_create(idx, &target_blob, (uint64_t)id, idx->block_size, 0);
+  if (rc == DISKANN_ROW_NOT_FOUND) {
+    rc = DISKANN_ERROR_NOTFOUND;
+    goto rollback;
+  }
+  if (rc != DISKANN_OK) goto rollback;
+
+  /* Read target node data */
+  rc = blob_spot_reload(idx, target_blob, (uint64_t)id, idx->block_size);
+  if (rc != DISKANN_OK) goto rollback;
+
+  /* Read edge count and clean up back-edges from neighbors */
+  uint16_t n_edges = node_bin_edges(idx, target_blob);
+
+  if (n_edges > 0) {
+    /* Create writable BlobSpot (initial rowid = target, which exists) */
+    rc = blob_spot_create(idx, &edge_blob, (uint64_t)id, idx->block_size, 1);
+    if (rc != DISKANN_OK) goto rollback;
+
+    for (uint16_t i = 0; i < n_edges; i++) {
+      uint64_t edge_rowid;
+      node_bin_edge(idx, target_blob, (int)i, &edge_rowid, NULL, NULL);
+
+      rc = blob_spot_reload(idx, edge_blob, edge_rowid, idx->block_size);
+      if (rc == DISKANN_ROW_NOT_FOUND) {
+        continue; /* Zombie edge — neighbor already deleted */
+      }
+      if (rc != DISKANN_OK) goto rollback;
+
+      /* Find back-edge pointing to the deleted node (NOT the neighbor's own id) */
+      int del_idx = node_bin_edge_find_idx(idx, edge_blob, (uint64_t)id);
+      if (del_idx == -1) {
+        continue; /* No back-edge (unidirectional or already removed) */
+      }
+
+      node_bin_delete_edge(idx, edge_blob, del_idx);
+      rc = blob_spot_flush(idx, edge_blob);
+      if (rc != DISKANN_OK) goto rollback;
+    }
+
+    blob_spot_free(edge_blob);
+    edge_blob = NULL;
+  }
+
+  /* Free target blob before deleting the row */
+  blob_spot_free(target_blob);
+  target_blob = NULL;
+
+  /* Delete shadow table row */
+  sql = sqlite3_mprintf(
+    "DELETE FROM \"%w\".%s WHERE id = ?",
+    idx->db_name, idx->shadow_name
+  );
+  if (!sql) {
+    rc = DISKANN_ERROR_NOMEM;
+    goto rollback;
+  }
+
+  rc = sqlite3_prepare_v2(idx->db, sql, -1, &stmt, NULL);
+  sqlite3_free(sql);
+  sql = NULL;
+  if (rc != SQLITE_OK) {
+    rc = DISKANN_ERROR;
+    goto rollback;
+  }
+
+  sqlite3_bind_int64(stmt, 1, id);
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  stmt = NULL;
+
+  if (rc != SQLITE_DONE) {
+    rc = DISKANN_ERROR;
+    goto rollback;
+  }
+
+  /* Verify exactly 1 row was deleted */
+  if (sqlite3_changes(idx->db) != 1) {
+    rc = DISKANN_ERROR_NOTFOUND;
+    goto rollback;
+  }
+
+  /* Release SAVEPOINT — commit */
+  sql = sqlite3_mprintf("RELEASE diskann_delete_%s", idx->index_name);
+  if (!sql) {
+    rc = DISKANN_ERROR_NOMEM;
+    goto rollback;
+  }
+  rc = sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
+  sqlite3_free(sql);
+
+  return (rc == SQLITE_OK) ? DISKANN_OK : DISKANN_ERROR;
+
+rollback:
+  if (target_blob) blob_spot_free(target_blob);
+  if (edge_blob) blob_spot_free(edge_blob);
+  if (stmt) sqlite3_finalize(stmt);
+
+  sql = sqlite3_mprintf("ROLLBACK TO diskann_delete_%s; "
+                         "RELEASE diskann_delete_%s",
+                         idx->index_name, idx->index_name);
+  if (sql) {
+    sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
+    sqlite3_free(sql);
+  }
+  return rc;
 }
 
 int diskann_drop_index(

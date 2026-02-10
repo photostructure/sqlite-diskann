@@ -110,6 +110,16 @@ extern void test_node_free_null(void);
 /* DiskAnnIndex derived fields tests */
 extern void test_open_index_computes_derived_fields(void);
 
+/* Delete tests */
+extern void test_delete_null_index(void);
+extern void test_delete_from_empty_index(void);
+extern void test_delete_nonexistent_id(void);
+extern void test_delete_single_node_no_edges(void);
+extern void test_delete_node_cleans_backedges(void);
+extern void test_delete_last_node(void);
+extern void test_delete_double_delete(void);
+extern void test_delete_zombie_edge(void);
+
 void setUp(void) {
     /* Global setup if needed */
 }
@@ -233,6 +243,16 @@ int main(void) {
 
     /* DiskAnnIndex derived fields tests */
     RUN_TEST(test_open_index_computes_derived_fields);
+
+    /* Delete tests */
+    RUN_TEST(test_delete_null_index);
+    RUN_TEST(test_delete_from_empty_index);
+    RUN_TEST(test_delete_nonexistent_id);
+    RUN_TEST(test_delete_single_node_no_edges);
+    RUN_TEST(test_delete_node_cleans_backedges);
+    RUN_TEST(test_delete_last_node);
+    RUN_TEST(test_delete_double_delete);
+    RUN_TEST(test_delete_zombie_edge);
 
     return UNITY_END();
 }
