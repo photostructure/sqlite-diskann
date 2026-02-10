@@ -10,6 +10,7 @@ CFLAGS += -Wconversion -Wshadow -Wstrict-prototypes
 CFLAGS += -Ivendor/sqlite  # Use vendored SQLite 3.51.2 headers
 LDFLAGS = -shared
 LIBS = -lm
+# Note: Do NOT link -lsqlite3. SQLite symbols resolved from host at runtime.
 
 # Extra flags for sanitizer builds (passed via recursive make)
 EXTRA_CFLAGS ?=
@@ -25,7 +26,7 @@ TEST_BIN = test_diskann
 STRESS_BIN = test_stress
 
 # Source files
-SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c
+SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c $(SRC_DIR)/diskann_vtab.c
 TEST_C_SOURCES = $(filter-out %/test_runner.c %/test_stress.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
@@ -48,9 +49,9 @@ endif
 # Default target
 all: $(BUILD_DIR)/$(EXTENSION)
 
-# Build extension
+# Build extension (without sqlite3.o - symbols resolved from host at runtime)
 $(BUILD_DIR)/$(EXTENSION): $(SOURCES) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+	$(CC) $(CFLAGS) -DDISKANN_EXTENSION $(LDFLAGS) -o $@ $^ $(LIBS)
 	@echo "Built: $@"
 
 # Build directory
