@@ -9,7 +9,7 @@ CFLAGS = -std=c17 -Wall -Wextra -Werror -pedantic -fPIC -O2
 CFLAGS += -Wconversion -Wshadow -Wstrict-prototypes
 CFLAGS += -Ivendor/sqlite  # Use vendored SQLite 3.51.2 headers
 LDFLAGS = -shared
-LIBS = -lpthread -ldl -lm
+LIBS = -lm
 
 # Extra flags for sanitizer builds (passed via recursive make)
 EXTRA_CFLAGS ?=
