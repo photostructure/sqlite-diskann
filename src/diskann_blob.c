@@ -9,8 +9,8 @@
 #include "diskann_blob.h"
 #include "diskann.h"
 #include "diskann_internal.h"
+#include "diskann_sqlite.h"
 #include <assert.h>
-#include <sqlite3.h>
 #include <string.h>
 
 /*

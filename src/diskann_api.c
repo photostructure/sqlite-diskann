@@ -149,17 +149,11 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
   if (rc == 1)
     return DISKANN_ERROR_EXISTS;
 
-  /* Wrap everything in a SAVEPOINT for atomicity */
-  sql = sqlite3_mprintf("SAVEPOINT diskann_create_%s", index_name);
-  if (!sql)
-    return DISKANN_ERROR_NOMEM;
-  rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
-  sqlite3_free(sql);
-  if (rc != SQLITE_OK) {
-    if (err_msg)
-      sqlite3_free(err_msg);
-    return DISKANN_ERROR;
-  }
+  /* Note: No SAVEPOINT needed - when called from xCreate, we're already in a
+   * transaction context. Attempting to create a SAVEPOINT fails with
+   * SQLITE_BUSY "cannot open savepoint - SQL statements in progress".
+   * If any operation fails, returning an error causes SQLite to roll back
+   * automatically. */
 
   /* Create shadow table: {index_name}_shadow (id INTEGER PRIMARY KEY, data
    * BLOB) */
@@ -170,18 +164,17 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
                         db_name, index_name);
 
   if (!sql) {
-    rc = DISKANN_ERROR_NOMEM;
-    goto rollback;
+    return DISKANN_ERROR_NOMEM;
   }
 
   rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
   sqlite3_free(sql);
+  sql = NULL;
 
   if (rc != SQLITE_OK) {
     if (err_msg)
       sqlite3_free(err_msg);
-    rc = DISKANN_ERROR;
-    goto rollback;
+    return DISKANN_ERROR;
   }
 
   /* Create metadata table: {index_name}_metadata (key TEXT, value INTEGER) */
@@ -192,77 +185,51 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
                         db_name, index_name);
 
   if (!sql) {
-    rc = DISKANN_ERROR_NOMEM;
-    goto rollback;
+    return DISKANN_ERROR_NOMEM;
   }
 
   rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
   sqlite3_free(sql);
+  sql = NULL;
 
   if (rc != SQLITE_OK) {
     if (err_msg)
       sqlite3_free(err_msg);
-    rc = DISKANN_ERROR;
-    goto rollback;
+    return DISKANN_ERROR;
   }
 
   /* Store index configuration as portable integers */
   rc = store_metadata_int(db, db_name, index_name, "dimensions",
                           (int64_t)config->dimensions);
   if (rc != DISKANN_OK)
-    goto rollback;
+    return rc;
   rc = store_metadata_int(db, db_name, index_name, "metric",
                           (int64_t)config->metric);
   if (rc != DISKANN_OK)
-    goto rollback;
+    return rc;
   rc = store_metadata_int(db, db_name, index_name, "max_neighbors",
                           (int64_t)config->max_neighbors);
   if (rc != DISKANN_OK)
-    goto rollback;
+    return rc;
   rc = store_metadata_int(db, db_name, index_name, "search_list_size",
                           (int64_t)config->search_list_size);
   if (rc != DISKANN_OK)
-    goto rollback;
+    return rc;
   rc = store_metadata_int(db, db_name, index_name, "insert_list_size",
                           (int64_t)config->insert_list_size);
   if (rc != DISKANN_OK)
-    goto rollback;
+    return rc;
   rc = store_metadata_int(db, db_name, index_name, "block_size",
                           (int64_t)config->block_size);
   if (rc != DISKANN_OK)
-    goto rollback;
+    return rc;
   /* Store pruning_alpha as fixed-point integer (×1000) for portability */
   rc = store_metadata_int(db, db_name, index_name, "pruning_alpha_x1000",
                           (int64_t)(DEFAULT_PRUNING_ALPHA * 1000.0));
   if (rc != DISKANN_OK)
-    goto rollback;
-
-  /* Commit the savepoint */
-  sql = sqlite3_mprintf("RELEASE diskann_create_%s", index_name);
-  if (!sql) {
-    rc = DISKANN_ERROR_NOMEM;
-    goto rollback;
-  }
-  rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
-  sqlite3_free(sql);
-  if (rc != SQLITE_OK) {
-    if (err_msg)
-      sqlite3_free(err_msg);
-    rc = DISKANN_ERROR;
-    goto rollback;
-  }
+    return rc;
 
   return DISKANN_OK;
-
-rollback:
-  sql = sqlite3_mprintf("ROLLBACK TO diskann_create_%s; "
-                        "RELEASE diskann_create_%s",
-                        index_name, index_name);
-  if (sql) {
-    sqlite3_exec(db, sql, NULL, NULL, NULL);
-    sqlite3_free(sql);
-  }
-  return rc;
 }
 
 int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,

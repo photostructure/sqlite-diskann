@@ -48,7 +48,11 @@ const photostructureFactory: DbFactory = {
   create: (path: string) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DatabaseSync } = require("@photostructure/sqlite");
-    return new DatabaseSync(path);
+    // Enable extension loading
+    const db = new DatabaseSync(path, { allowExtension: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).enableLoadExtension?.(true);
+    return db;
   },
   cleanup: closeDb,
 };
@@ -62,7 +66,11 @@ const betterSqlite3Factory: DbFactory = {
   create: (path: string) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Database = require("better-sqlite3");
-    return new Database(path);
+    // Enable extension loading for better-sqlite3
+    const db = new Database(path);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).loadExtension = (db as any).loadExtension;
+    return db;
   },
   cleanup: closeDb,
 };
@@ -86,7 +94,11 @@ const nodeSqliteFactory: DbFactory = {
   create: (path: string) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DatabaseSync } = require("node:sqlite");
-    return new DatabaseSync(path);
+    // Enable extension loading for node:sqlite
+    const db = new DatabaseSync(path, { allowExtension: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).enableLoadExtension?.(true);
+    return db;
   },
   cleanup: closeDb,
 };

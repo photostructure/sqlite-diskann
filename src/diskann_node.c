@@ -7,9 +7,9 @@
 ** MIT License
 */
 #include "diskann_node.h"
+#include "diskann_sqlite.h"
 #include <assert.h>
 #include <math.h>
-#include <sqlite3.h>
 #include <stdlib.h>
 
 /**************************************************************************

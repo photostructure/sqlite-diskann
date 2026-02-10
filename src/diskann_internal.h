@@ -13,7 +13,7 @@
 #define DISKANN_INTERNAL_H
 
 #include "diskann.h"
-#include <sqlite3.h>
+#include "diskann_sqlite.h"
 #include <stdint.h>
 
 #ifdef __cplusplus

@@ -11,8 +11,8 @@
 #include "diskann_internal.h"
 #include "diskann_node.h"
 #include "diskann_search.h"
+#include "diskann_sqlite.h"
 #include <assert.h>
-#include <sqlite3.h>
 #include <stdlib.h>
 
 /**************************************************************************
