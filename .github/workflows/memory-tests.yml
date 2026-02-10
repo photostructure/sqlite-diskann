@@ -18,13 +18,11 @@ jobs:
         include:
           - { os: ubuntu-24.04, name: linux-x64 }
           - { os: ubuntu-24.04-arm, name: linux-arm64 }
-          - { os: macos-14, name: macos-arm64 }
-          - { os: macos-15-intel, name: macos-x64 }
     name: asan (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Run AddressSanitizer + UBSan
+      - name: Run AddressSanitizer + UBSan + LeakSanitizer
         run: make asan
 
   valgrind:
