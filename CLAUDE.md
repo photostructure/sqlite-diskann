@@ -46,7 +46,7 @@ When in doubt about build setup, packaging, CI/CD configuration, or static analy
 This project is derived from libSQL's DiskANN implementation (MIT licensed). All derived code MUST:
 
 - Retain libSQL's original copyright: `Copyright 2024 the libSQL authors`
-- Add our modifications copyright: `Modifications Copyright 2025 PhotoStructure Inc.`
+- Add our modifications copyright: `Modifications Copyright 2026 PhotoStructure Inc.`
 - Keep the MIT license text intact
 - NEVER claim sole copyright on derived code
 
@@ -54,7 +54,7 @@ This project is derived from libSQL's DiskANN implementation (MIT licensed). All
 
 ```c
 /*
-** Copyright 2025 PhotoStructure Inc.
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License (see LICENSE file)
 */
 ```
@@ -65,7 +65,7 @@ This project is derived from libSQL's DiskANN implementation (MIT licensed). All
 /*
 ** Derived from libSQL DiskANN implementation
 ** Original Copyright 2024 the libSQL authors
-** Modifications Copyright 2025 PhotoStructure Inc.
+** Modifications Copyright 2026 PhotoStructure Inc.
 ** MIT License (see LICENSE file)
 */
 ```

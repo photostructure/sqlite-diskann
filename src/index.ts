@@ -3,7 +3,7 @@
  *
  * SQLite extension for DiskANN approximate nearest neighbor vector search
  *
- * Copyright 2025 PhotoStructure Inc.
+ * Copyright 2026 PhotoStructure Inc.
  * MIT License (see LICENSE file)
  */
 

@@ -12,7 +12,7 @@
 ** All tests use 128D vectors (realistic for embeddings) with seeded
 ** random generation for reproducibility.
 **
-** Copyright 2025 PhotoStructure Inc.
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
 #include "unity/unity.h"

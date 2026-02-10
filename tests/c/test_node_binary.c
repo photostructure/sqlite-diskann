@@ -2,7 +2,7 @@
 ** Tests for diskann_node.h/.c — node binary format, LE serialization,
 ** distance calculations, buffer management, and node alloc/free.
 **
-** Copyright 2025 PhotoStructure Inc.
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
 #include "../../src/diskann_node.h"
