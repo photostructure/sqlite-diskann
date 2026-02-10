@@ -4,16 +4,24 @@
 ** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 **
-** When building as extension (DISKANN_EXTENSION defined):
-**   - Include sqlite3ext.h and use extension API routing
-**   - All SQLite calls go through function pointers set by
-*SQLITE_EXTENSION_INIT2
-**   - SQLITE_EXTENSION_INIT1 appears in EXACTLY ONE file (diskann_vtab.c)
-**   - Other files use the extern declaration below
+** MULTI-FILE EXTENSION PROBLEM:
+** ==============================
+** DiskANN is a multi-file extension (6 .c files all calling SQLite functions).
+** When building as extension, ALL SQLite calls must be routed through the
+** sqlite3_api function pointer table. This header solves the problem:
 **
-** When building standalone (tests):
-**   - Include sqlite3.h directly
-**   - All SQLite calls are direct function calls
+** Extension builds (-DDISKANN_EXTENSION):
+**   - Includes <sqlite3ext.h> which provides routing macros
+**   - One file (diskann_vtab.c) defines DISKANN_VTAB_MAIN and owns the
+**     sqlite3_api definition via SQLITE_EXTENSION_INIT1
+**   - Other files get extern declaration to access the same pointer table
+**
+** Test builds (no flag):
+**   - Includes <sqlite3.h> directly for native linking with vendored SQLite
+**   - No extension macros needed
+**
+** This is NOT optional - removing it will cause "undefined symbol" errors.
+** See _todo/20260210-extension-loading-fix.md for full explanation.
 */
 
 #ifndef DISKANN_SQLITE_H

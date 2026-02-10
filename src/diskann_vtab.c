@@ -8,7 +8,9 @@
 ** Supports CREATE, INSERT, SELECT (search), DELETE.
 */
 
-/* Mark this as the main file that defines sqlite3_api (not extern) */
+/* Mark this as the main file that defines sqlite3_api (not extern).
+** Other .c files that include diskann_sqlite.h will get extern declaration.
+** This is required for multi-file extensions - do not remove. */
 #define DISKANN_VTAB_MAIN
 
 #include "diskann.h"

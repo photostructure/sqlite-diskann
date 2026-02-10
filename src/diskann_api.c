@@ -10,6 +10,7 @@
 #include "diskann_blob.h"
 #include "diskann_internal.h"
 #include "diskann_node.h"
+#include "diskann_util.h"
 #include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -28,32 +29,6 @@
 /* Maximum allowed values */
 #define MAX_DIMENSIONS 16384
 #define MAX_BLOCK_SIZE 134217728 /* 128MB */
-#define MAX_IDENTIFIER_LEN 64
-
-/*
-** Validate a SQL identifier (index name or database name).
-** Must match [a-zA-Z_][a-zA-Z0-9_]*, max MAX_IDENTIFIER_LEN chars.
-** Returns 1 if valid, 0 if invalid.
-*/
-static int validate_identifier(const char *name) {
-  if (!name || !name[0])
-    return 0;
-  char c = name[0];
-  if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_')) {
-    return 0;
-  }
-  size_t len = 1;
-  for (const char *p = name + 1; *p; p++, len++) {
-    if (len > MAX_IDENTIFIER_LEN)
-      return 0;
-    c = *p;
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-          (c >= '0' && c <= '9') || c == '_')) {
-      return 0;
-    }
-  }
-  return 1;
-}
 
 /*
 ** Store a single metadata key-value pair as a SQLite INTEGER.
