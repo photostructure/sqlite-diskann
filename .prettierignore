@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+dist/
+node_modules/
+vendor/
+
+# Generated files
+*.o
+*.so
+*.dylib
+*.dll
+compile_commands.json
+coverage/
+
+# C source (use clang-format instead)
+*.c
+*.h

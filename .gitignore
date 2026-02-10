@@ -1,0 +1,51 @@
+# Build artifacts
+build/
+dist/
+*.o
+*.so
+*.dylib
+*.dll
+*.a
+
+# Compilation database
+compile_commands.json
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+tmp/
+temp/
+
+# Prettier cache
+.prettier-cache
+
+# Test databases
+*.db
+*.db-shm
+*.db-wal

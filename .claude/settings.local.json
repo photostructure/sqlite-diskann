@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:photostructure.com)",
+      "Bash(make clean:*)",
+      "Bash(make test)",
+      "Bash(make asan:*)",
+      "Bash(make valgrind:*)"
+    ]
+  }
+}

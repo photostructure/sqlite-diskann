@@ -1,0 +1,57 @@
+---
+# Clang-tidy configuration for sqlite-diskann
+# Focus on C best practices, memory safety, and SQLite extension patterns
+
+Checks: '
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-*,
+  -cert-err58-cpp,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-union-access,
+  misc-*,
+  -misc-include-cleaner,
+  performance-*,
+  readability-*,
+  -readability-else-after-return,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length
+'
+
+# Treat warnings as errors
+WarningsAsErrors: ''
+
+# Header filter - only check our headers
+HeaderFilterRegex: '^src/.*\.h$'
+
+# Format style
+FormatStyle: file
+
+# Check options (C-specific naming conventions)
+CheckOptions:
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.StructCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefSuffix
+    value: _t
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: false
