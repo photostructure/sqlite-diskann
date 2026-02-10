@@ -12,6 +12,12 @@ vendor/
 compile_commands.json
 coverage/
 
+# Binary files
+*.bin
+
+# Benchmark datasets
+benchmarks/datasets/
+
 # C source and tooling (use clang-format instead)
 *.c
 *.h
