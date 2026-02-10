@@ -50,6 +50,7 @@ pointing to the deleted node, then deletes the shadow table row. Uses a conserva
 ## Tribal Knowledge
 
 **The delete algorithm is conservative — no graph repair:**
+
 1. Load target node's BLOB (get its edge list)
 2. For each edge (neighbor) in the target node:
    a. Load neighbor's BLOB
@@ -60,6 +61,7 @@ pointing to the deleted node, then deletes the shadow table row. Uses a conserva
 
 **Why no graph repair?** Reconnecting edges after delete is expensive (requires running
 search to find replacement edges) and the conservative approach works well in practice:
+
 - Zombie edges (edges pointing to deleted nodes) are tolerated
 - `diskAnnSearchInternal` handles `DISKANN_ERROR_NOTFOUND` by skipping
 - Graph quality degrades gradually, not catastrophically
@@ -70,6 +72,7 @@ If it fails partway through, some neighbors have had their back-edge removed but
 target node still exists — leaving the graph inconsistent. Wrap in SAVEPOINT.
 
 **Our API simplification vs libSQL:**
+
 - libSQL: `diskAnnDelete(pIndex, VectorInRow *pInRow, ...)` with multi-key lookup
 - Ours: `diskann_delete(DiskAnnIndex *idx, int64_t id)` — delete by rowid directly
 - This eliminates `diskAnnGetShadowRowid()` entirely — we already have the rowid
@@ -90,12 +93,14 @@ BlobSpot reuse via `blob_spot_reload()` overwrites the buffer.
 ## Solutions
 
 ### Option 1: Implement directly in `diskann_api.c` ⭐ CHOSEN
+
 **Pros:** Delete is ~80 lines of logic, doesn't warrant its own file. All public API
 functions live in diskann_api.c already.
 **Cons:** diskann_api.c grows slightly
 **Status:** Chosen — right-sized for the existing file
 
 ### Option 2: Separate `diskann_delete.c`
+
 **Pros:** Isolation
 **Cons:** Overkill for ~80 lines of new code
 **Status:** Rejected
@@ -105,9 +110,9 @@ functions live in diskann_api.c already.
 - [x] Study `diskAnnDelete()` algorithm (lines 1626-1703)
 - [x] Study `nodeBinDeleteEdge()` (lines 426-448) — swap-with-last pattern
 - [x] **Bug found in original libSQL code (line 1676):** `nodeBinEdgeFindIdx(pIndex,
-  pEdgeBlob, edgeRowid)` searches for the NEIGHBOR's own rowid instead of the deleted
-  node's rowid (`nodeRowid`). Back-edges were never actually cleaned up. Fixed in our
-  extraction.
+pEdgeBlob, edgeRowid)` searches for the NEIGHBOR's own rowid instead of the deleted
+      node's rowid (`nodeRowid`). Back-edges were never actually cleaned up. Fixed in our
+      extraction.
 - [x] Write tests in `tests/c/test_delete.c` (TDD — tests first):
   - Delete NULL index → `DISKANN_ERROR_INVALID`
   - Delete from empty index → `DISKANN_ERROR_NOTFOUND`
@@ -137,6 +142,7 @@ functions live in diskann_api.c already.
 - [x] Verify: `make test` (8/8 delete tests pass), `make asan` (clean), `make valgrind` (clean)
 
 **Verification:**
+
 ```bash
 make test      # All tests pass
 make asan      # No memory errors

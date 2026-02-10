@@ -9,14 +9,14 @@ the navigable graph.
 
 ## Current Phase
 
-- [ ] Research & Planning
-- [ ] Test Design
-- [ ] Implementation Design
-- [ ] Test-First Development
-- [ ] Implementation
-- [ ] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Research & Planning
+- [x] Test Design
+- [x] Implementation Design
+- [x] Test-First Development
+- [x] Implementation
+- [x] Integration
+- [x] Cleanup & Documentation
+- [x] Final Review
 
 ## Required Reading
 
@@ -38,7 +38,7 @@ the navigable graph.
   insert algorithm in `diskann.c` is coupled to libSQL types (VectorInRow, VectorPair,
   Vector) and uses libSQL-internal APIs (`sqlite3MPrintf`, `sqlite3DbFree`).
 - **Constraints:** Must use standalone types from `20250209-shared-graph-types.md`
-  (DiskAnnNode, node_bin_* functions, distance functions). Must use search infrastructure
+  (DiskAnnNode, node*bin*\* functions, distance functions). Must use search infrastructure
   from `20250209-knn-search.md` (`diskann_search_internal()`, search context). Float32-only
   eliminates VectorPair entirely. Must wrap multi-row mutations in SAVEPOINT.
 - **Success Criteria:**
@@ -55,12 +55,14 @@ the navigable graph.
 **The insert algorithm has two phases after finding neighbors:**
 
 Phase 1 — Add visited nodes as edges to the NEW node:
+
 - For each visited node, call `replace_edge_idx()` on the new node's BLOB
 - This decides: append (if room), replace (if new edge is better), or skip (if pruned)
 - After each addition, `prune_edges()` removes edges dominated by the new one
 - At the end of Phase 1, the new node has edges pointing to nearby existing nodes
 
 Phase 2 — Add the NEW node as an edge to visited nodes:
+
 - For each visited node, call `replace_edge_idx()` on the visited node's BLOB
 - Same replace/append/skip logic, but operating on existing nodes
 - After each addition, `prune_edges()` on the visited node's BLOB
@@ -68,6 +70,7 @@ Phase 2 — Add the NEW node as an edge to visited nodes:
 - At the end of Phase 2, existing nodes have edges pointing back to the new node
 
 **Edge replacement algorithm (`replace_edge_idx`):**
+
 ```
 For each existing edge E (reverse order):
   If E.rowid == new_rowid: return E's index (replace zombie/duplicate)
@@ -80,14 +83,17 @@ Else: return best replacement index (or -1)
 
 **Edge pruning algorithm (`prune_edges`):**
 After inserting edge at position `iInserted`:
+
 ```
 For each edge E (not the new one):
   hint_to_edge = distance(new_edge, E)
   If dist(node, E) > alpha * hint_to_edge: delete E (dominated by new edge)
 ```
+
 This maintains graph diversity — prevents redundant edges to clustered nodes.
 
 **The `pruning_alpha` parameter** (default 1.2, stored ×1000 in metadata):
+
 - alpha = 1.0: aggressive pruning (sparse graph, fast inserts, lower recall)
 - alpha = 1.2: balanced (default, good recall)
 - alpha > 1.5: minimal pruning (dense graph, slow inserts, highest recall)
@@ -95,6 +101,7 @@ This maintains graph diversity — prevents redundant edges to clustered nodes.
 **VectorPair elimination for float32-only:**
 The original code uses `VectorPair` to handle separate node/edge vector types
 (compression). With float32-only, `nNodeVectorSize == nEdgeVectorSize`, so:
+
 - `initVectorPair()` → no-op (nothing to allocate)
 - `loadVectorPair(pair, vec)` → just use the `float*` directly
 - `deinitVectorPair()` → no-op (nothing to free)
@@ -107,6 +114,7 @@ distance from scratch (V1 doesn't store distances). We only support V3 where dis
 are stored in edge metadata. These branches are removed entirely.
 
 **Shadow row insertion simplified:**
+
 - libSQL: dynamic multi-key INSERT with column name rendering
 - Ours: `INSERT INTO "{db}".{idx}_shadow (id, data) VALUES (?, zeroblob(?))`
 - The user provides `id` directly. Since `id INTEGER PRIMARY KEY` aliases SQLite's
@@ -138,11 +146,13 @@ context deinit frees them all.
 ## Solutions
 
 ### Option 1: New `src/diskann_insert.c` file ⭐ CHOSEN
+
 **Pros:** Clean separation (like search.c), helpers are insert-specific
 **Cons:** Another source file
 **Status:** Chosen — `replace_edge_idx` and `prune_edges` are ~130 LOC of insert-only logic
 
 ### Option 2: Add to `diskann_api.c`
+
 **Pros:** Fewer files
 **Cons:** diskann_api.c already has lifecycle + drop/clear code, would grow too large
 **Status:** Rejected
@@ -193,22 +203,43 @@ context deinit frees them all.
   - Insert duplicate ID → `DISKANN_ERROR_EXISTS`
   - Insert 100 random vectors → recall > 95% vs brute force
   - Edge count respects `node_edges_max_count()` limit
-- [ ] Wire `diskann_insert.c` into Makefile SOURCES and test_runner.c
+- [x] Wire `diskann_insert.c` into Makefile SOURCES and test_runner.c
+- [x] Remove `diskann_insert()` stub from `src/diskann_api.c`
 
 **Verification:**
+
 ```bash
-make test      # All tests pass
+make test      # 122 tests, 0 failures
 make asan      # No memory errors
-make valgrind  # No leaks
+make valgrind  # No leaks, 0 errors
 ```
+
+## Session Notes (2025-02-09, Implementation)
+
+**SAVEPOINT must precede search.** The original libSQL code doesn't use SAVEPOINTs
+(relies on virtual table transaction handling). Our standalone API wraps in SAVEPOINT
+for atomicity. Key discovery: the SAVEPOINT must be started BEFORE `search_internal`
+(not after), because writable blob handles opened during search cause `SQLITE_BUSY`
+if a SAVEPOINT is started while they're open.
+
+**blob_spot_reload required before node_bin_init.** `blob_spot_create` opens a handle
+but sets `is_initialized = 0`. `node_bin_init` writes to the buffer but doesn't
+set the flag. `blob_spot_flush` requires `is_initialized = 1`. Solution: call
+`blob_spot_reload` between `blob_spot_create` and `node_bin_init` to read the
+zeroblob and set the flag.
+
+**11 tests written:** validation (3), first vector (1), two vectors bidirectional (1),
+duplicate ID (1), 10-vector searchable (1), edge count limit (1), recall (1),
+insert-delete-search integration (1), cosine metric (1).
+
+**All 8 public API functions now implemented.** 122 tests total, ASan + Valgrind clean.
 
 ## Notes
 
-**Blocked by:** `20250209-knn-search.md` (needs `diskann_search_internal()`,
-`diskann_search_ctx_init/deinit`, `diskann_select_random_shadow_row()`)
+**Blocked by:** ~~`20250209-knn-search.md`~~ ✅ Complete
 
 **NOT blocked by:** `20250209-vector-delete.md` — insert and delete are independent.
 
-**After this TPP completes:** All 8 public API functions will be implemented. The
+**After this TPP completes:** All 8 public API functions are implemented. The
 `src/diskann.c` original libSQL file can be archived or removed. Integration tests
 (create → insert → search → delete full workflow) should be written as a separate TPP.

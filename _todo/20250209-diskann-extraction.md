@@ -10,7 +10,7 @@ Extract Turso's DiskANN implementation from libSQL and create a standalone SQLit
 - [x] Test Design
 - [x] Implementation Design
 - [x] Test-First Development
-- [ ] Implementation
+- [x] Implementation
 - [ ] Integration
 - [ ] Cleanup & Documentation
 - [ ] Final Review
@@ -196,6 +196,7 @@ PhotoStructure needs ANN vector search for millions of CLIP embeddings. Current 
 **Session 2025-02-09 Part 2 - Task 1 (open/close) Complete:**
 
 **What was done THIS session:**
+
 - ✅ Created `src/diskann_internal.h` - Defines DiskAnnIndex struct
 - ✅ Implemented diskann_open_index() - Loads metadata from database, validates index exists
 - ✅ Implemented diskann_close_index() - Frees resources safely (handles NULL)
@@ -206,10 +207,12 @@ PhotoStructure needs ANN vector search for millions of CLIP embeddings. Current 
 - ✅ All 30 tests passing with AddressSanitizer clean
 
 **Files created THIS session:**
+
 - `src/diskann_internal.h` (new)
 - `tests/c/test_open_close_index.c` (new)
 
 **Files modified THIS session:**
+
 - `src/diskann_api.c` - Added open/close implementation, metadata storage
 - `tests/c/test_runner.c` - Added test declarations
 
@@ -218,6 +221,7 @@ PhotoStructure needs ANN vector search for millions of CLIP embeddings. Current 
 **Session 2025-02-09 Part 3 - Task 8 (BLOB I/O) Complete:**
 
 **What was done THIS session:**
+
 - ✅ Created `src/diskann_blob.h` - BLOB I/O API with BlobSpot structure
 - ✅ Created `src/diskann_blob.c` - Full implementation extracted from libSQL
 - ✅ Updated `src/diskann_internal.h` - Added num_reads/num_writes statistics
@@ -226,6 +230,7 @@ PhotoStructure needs ANN vector search for millions of CLIP embeddings. Current 
 - ✅ All 37 tests passing (up from 30), AddressSanitizer clean
 
 **BLOB I/O features implemented:**
+
 - blob_spot_create() - Open BLOB handle, allocate buffer
 - blob_spot_reload() - Reuse handle for different rowids (optimization)
 - blob_spot_flush() - Write buffer back to database
@@ -234,29 +239,34 @@ PhotoStructure needs ANN vector search for millions of CLIP embeddings. Current 
 - Abort recovery - Handles SQLITE_ABORT by closing/reopening
 
 **Files created THIS session:**
+
 - `src/diskann_blob.h` (new)
 - `src/diskann_blob.c` (new)
 - `tests/c/test_blob_io.c` (new)
 
 **Files modified THIS session:**
+
 - `src/diskann_internal.h` - Added statistics fields
 - `src/diskann_api.c` - Initialize statistics in diskann_open_index()
 - `tests/c/test_runner.c` - Added 7 BLOB test declarations
 - `Makefile` - Include diskann_blob.c in test build
 
 **Design decisions:**
+
 - Used sqlite3_malloc/sqlite3_free for consistency with SQLite
 - Reuse BLOB handles via sqlite3_blob_reopen() for performance
 - Track num_reads/num_writes for debugging/profiling
 - Safe with NULL (blob_spot_free can handle NULL)
 
 **Critical path complete:**
+
 - Tasks 7 & 8 unblock Tasks 4-6 (insert/search/delete)
 - Next: Implement diskann_insert() (Task 4)
 
 **Session 2025-02-09 Part 4 - Code Review Fixes:**
 
 **Bugs fixed in diskann_api.c:**
+
 1. **SQL injection via index_name:** Added `validate_identifier()` — names must match
    `[a-zA-Z_][a-zA-Z0-9_]{0,63}`. Applied to all 5 public functions.
 2. **Platform-dependent metadata:** Changed from native-endian BLOBs to portable SQLite
@@ -274,6 +284,7 @@ now use `"%w"` for db_name (was missing schema qualification).
 **Session 2025-02-09 Part 5 - Task 7 Edge Case Tests Complete:**
 
 **What was done THIS session:**
+
 - ✅ Added `test_blob_spot_flush_readonly()` - Verifies DISKANN_ERROR_INVALID when flushing read-only BlobSpot
 - ✅ Added `test_blob_spot_create_null_output()` - Verifies DISKANN_ERROR_INVALID with NULL output pointer
 - ✅ Added `test_clear_index_preserves_metadata()` - Verifies metadata table survives clear, values intact
@@ -281,6 +292,7 @@ now use `"%w"` for db_name (was missing schema qualification).
 - ✅ All 46 tests passing (up from 39), ASan + Valgrind clean
 
 **Files modified THIS session:**
+
 - `tests/c/test_blob_io.c` - Added 2 edge case tests (flush readonly, NULL output)
 - `tests/c/test_drop_clear_index.c` - Added metadata preservation test + helper functions
 - `tests/c/test_runner.c` - Added 3 test declarations and runner calls
@@ -352,7 +364,7 @@ now use `"%w"` for db_name (was missing schema qualification).
 - [x] Map coupling points (VectorInRow, VectorOutRows, sqlite3MPrintf, etc.)
 - [x] Create extension skeleton with build system (Makefile with asan/valgrind/bear)
 
-### Phase 2: Decoupling ⏳ IN PROGRESS
+### Phase 2: Decoupling ✅ COMPLETE
 
 - [x] Design new public API (src/diskann.h - 8 functions)
 - [x] Create stub implementations (src/diskann_api.c)
@@ -365,34 +377,34 @@ now use `"%w"` for db_name (was missing schema qualification).
 - [x] Implement diskann_close_index() ✅ (proper resource cleanup, safe with NULL)
 - [x] **TASK 7:** Define internal types (diskann_internal.h) ✅ COMPLETE
 - [x] **TASK 8:** Implement BLOB I/O layer (diskann_blob.c) ✅ COMPLETE
-- [ ] **TASK 4:** Implement diskann_insert() (graph construction)
-- [ ] **TASK 5:** Implement diskann_search() (k-NN search)
-- [ ] **TASK 6:** Implement diskann_delete() (graph update)
-- [ ] Replace libSQL vector types with DiskAnnVector
-- [ ] Port parameter management (simplified DiskAnnConfig) - partially done
-- [ ] Remove all libSQL dependencies (replace sqlite3MPrintf, etc.)
+- [x] **TASK 4:** Implement diskann_insert() (graph construction) ✅ COMPLETE
+- [x] **TASK 5:** Implement diskann_search() (k-NN search) ✅ COMPLETE
+- [x] **TASK 6:** Implement diskann_delete() (graph update) ✅ COMPLETE
+- [x] Replace libSQL vector types with DiskAnnVector ✅
+- [x] Port parameter management (simplified DiskAnnConfig) ✅
+- [x] Remove all libSQL dependencies (replace sqlite3MPrintf, etc.) ✅
 
 ### Phase 3: Cross-Platform Build
 
 - [x] Linux build (gcc/clang) - working locally
-- [ ] macOS build (x86_64 and ARM64)
-- [ ] Windows build (MSVC and MinGW)
-- [ ] **TASK 10:** Setup GitHub Actions CI/CD (follow fs-metadata pattern)
-- [ ] Create prebuilt binaries (prebuildify)
+- [x] macOS build (x86_64 and ARM64) - CI jobs: test-macos-arm64, test-macos-x64
+- [x] Windows build (MSVC) - CI jobs: test-windows-x64, test-windows-arm64 via scripts/build-windows.ps1
+- [x] **TASK 10:** Setup GitHub Actions CI/CD (follow fs-metadata pattern) ✅ 6 platform jobs + lint + TypeScript + publish
+- [x] Create prebuilt binaries - artifacts staged per-platform in CI (prebuilds/{os}-{arch}/)
 - [ ] Verify loadable in SQLite on all platforms
 
 ### Phase 4: Testing
 
-- [ ] Basic operations (create/insert/query/delete)
-- [ ] Correctness tests (compare to brute-force)
+- [x] Basic operations (create/insert/query/delete) - 126 tests covering all 8 API functions
+- [x] Correctness tests (compare to brute-force) - test_search_brute_force_recall, test_insert_recall
 - [ ] Scale tests (1M, 3M, 5M, 10M vectors)
 - [ ] Performance benchmarks (query latency, index size)
-- [ ] Memory leak checks (Valgrind, ASan)
+- [x] Memory leak checks (Valgrind, ASan) - CI runs ASan on 4 platforms, Valgrind on 2
 
 ### Phase 5: Integration
 
 - [x] **TASK 3:** Create npm package structure (follow fs-metadata, NOT sqlite-vec) ✅
-- [ ] **TASK 9:** Integration tests (create → insert → search workflow)
+- [x] **TASK 9:** Integration tests (create → insert → search workflow) ✅ COMPLETE
 - [x] **TASK 11:** TypeScript wrapper and type definitions ✅
 - [ ] PhotoStructure integration
 - [ ] Migration for existing CLIP embeddings
@@ -401,14 +413,10 @@ now use `"%w"` for db_name (was missing schema qualification).
 **Verification:**
 
 ```bash
-# Current tests (working)
-make test          # 5 tests, 0 failures
+# Current tests
+make test          # 126 tests, 0 failures
 make asan          # AddressSanitizer checks
 make valgrind      # Memory leak checks
-
-# Future tests (once implemented)
-make benchmark
-./benchmark 5000000 768  # 5M CLIP vectors
 ```
 
 **Build commands:**
@@ -498,14 +506,17 @@ CREATE TABLE {index_name}_shadow (
 ### ✅ COMPLETED TASKS
 
 **TASK 1: Open/Close Index** ✅ COMPLETE
+
 - Implemented in `src/diskann_api.c`, tests in `tests/c/test_open_close_index.c`
 
 **TASK 3: npm Package Structure** ✅ COMPLETE
+
 - TypeScript wrapper, Vitest tests, tsconfig.json, .prettierrc
 - 7 skipped tests waiting for C extension binary
 - Reference: `../fs-metadata` pattern (NOT sqlite-vec)
 
 **TASK 11: TypeScript Wrapper and Type Definitions** ✅ COMPLETE
+
 - `src/index.ts` (233 lines): Complete API wrapper with platform-specific binary loading
   - `getExtensionPath()`, `loadDiskAnnExtension()`, `createDiskAnnIndex()`
   - `insertVector()`, `searchNearest()`, `deleteVector()`
@@ -600,20 +611,10 @@ CREATE TABLE {index_name}_shadow (
 
 ## Recommended Assignment (4 Engineers)
 
-**COMPLETED:** Tasks 1, 2, 3, 7 (partial), 8
+**COMPLETED:** All tasks (1-9, 11) ✅
 
-**NEXT: Tasks 4-6 (insert/search/delete) — Core algorithm work**
-
-All prerequisites are met (DiskAnnIndex struct, BLOB I/O layer, npm package).
-These are complex, performance-critical graph algorithm tasks extracted from libSQL.
-Recommend pairing/review for each.
-
-**Considerations for Tasks 4-6:**
-- **Transaction safety:** insert/delete mutate multiple rows. Consider wrapping in SAVEPOINT.
-- **Entry point:** libSQL uses random start (`diskAnnSelectRandomShadowRow`). Consider
-  storing a medoid/entry point in metadata for better search quality at scale.
-- **Vector format version:** libSQL has V2 vs V3 node layouts. Choose V3 (latest) only.
-- **Edge compression:** libSQL supports different node/edge vector types. Start with float32-only.
+All 8 public API functions implemented, 126 tests passing (ASan + Valgrind clean).
+Integration tests cover create → insert → search → delete workflow at 128D.
 
 ---
 
@@ -621,12 +622,12 @@ Recommend pairing/review for each.
 
 ```bash
 make test
-# 46 Tests 0 Failures 0 Ignored
+# 126 Tests 0 Failures 0 Ignored
 # OK ✅
 # ASan: clean, Valgrind: 0 leaks 0 errors
 ```
 
-**Tests Passing:**
+**Tests Passing (126 total):**
 
 - ✅ API existence (5 tests)
 - ✅ Create index (10 tests)
@@ -634,19 +635,31 @@ make test
 - ✅ Clear index (6 tests, including metadata preservation)
 - ✅ Open/Close index (11 tests)
 - ✅ BLOB I/O (9 tests, including readonly flush + NULL output edge cases)
+- ✅ LE serialization (5 tests)
+- ✅ Layout (4 tests)
+- ✅ Node binary (9 tests)
+- ✅ Distance (8 tests)
+- ✅ Buffer management (10 tests)
+- ✅ Node alloc (2 tests)
+- ✅ Derived fields (1 test)
+- ✅ Search validation (6 tests), empty (1), single-vector (3), known-graph (6), recall (1), cosine (1)
+- ✅ Delete (8 tests)
+- ✅ Insert (11 tests)
+- ✅ Integration (4 tests) — reopen persistence, clear+reinsert, 128D recall, delete at scale
 
-**Functions Implemented:** 5 of 8 (62.5%)
+**Functions Implemented:** 8 of 8 (100%) ✅
 
 - ✅ diskann_create_index()
 - ✅ diskann_open_index()
 - ✅ diskann_close_index()
 - ✅ diskann_drop_index()
 - ✅ diskann_clear_index()
-- ⬜ diskann_insert() - **Tasks 7 & 8 DONE - Ready to implement!**
-- ⬜ diskann_search() - **Tasks 7 & 8 DONE - Ready to implement!**
-- ⬜ diskann_delete() - **Tasks 7 & 8 DONE - Ready to implement!**
+- ✅ diskann_insert()
+- ✅ diskann_search()
+- ✅ diskann_delete()
 
 **BLOB I/O Layer:** ✅ COMPLETE
+
 - ✅ blob_spot_create()
 - ✅ blob_spot_reload()
 - ✅ blob_spot_flush()

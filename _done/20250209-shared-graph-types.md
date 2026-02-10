@@ -22,7 +22,7 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
 - `DESIGN-PRINCIPLES.md` - C coding standards
 - `src/diskann.c` lines 80-120 - Type definitions (DiskAnnNode, DiskAnnSearchCtx, VectorPair)
 - `src/diskann.c` lines 126-166 - LE serialization helpers (readLE*/writeLE*)
-- `src/diskann.c` lines 297-470 - Node binary format (layout helpers + nodeBin* functions)
+- `src/diskann.c` lines 297-470 - Node binary format (layout helpers + nodeBin\* functions)
 - `src/diskann.c` lines 881-952 - Vector pair helpers, distance calculation, buffer management
 - `src/diskann.c` lines 958-968 - diskAnnVectorDistance dispatcher (L2 + cosine only)
 - `src/diskann.c` lines 971-988 - diskAnnNodeAlloc/Free
@@ -41,7 +41,7 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
   Float32-only for now (no compression/quantization).
 - **Success Criteria:**
   - New files `src/diskann_node.h` and `src/diskann_node.c` compile cleanly
-  - All nodeBin* functions pass roundtrip tests (write then read back)
+  - All nodeBin\* functions pass roundtrip tests (write then read back)
   - Distance calculations match reference values for L2 and cosine
   - LE serialization passes tests against known byte sequences
   - All existing tests still pass
@@ -50,6 +50,7 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
 ## Tribal Knowledge
 
 **Key decisions:**
+
 - **Format version:** V3 only (latest). Drop V1/V2 compatibility entirely.
   - V3 node metadata = 16 bytes (`u64 rowid` + `u64` where only low 16 bits are edge count)
   - V2 node metadata = 10 bytes — we do NOT support this.
@@ -59,6 +60,7 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
   Dot product would be new functionality — defer to a separate TPP if needed.
 
 **Node BLOB layout (V3 format, float32-only):**
+
 ```
 [0-7]    Node rowid (uint64_t LE)
 [8-15]   Edge count in low 16 bits (uint64_t LE, upper 48 bits zero/reserved)
@@ -68,6 +70,7 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
 ```
 
 **Edge metadata layout (16 bytes per edge, NOT 12):**
+
 ```
 [0-3]   Unused/padding (4 bytes)
 [4-7]   Distance as float, stored as uint32_t LE (4 bytes)
@@ -75,15 +78,17 @@ Port DiskANN's internal types (DiskAnnNode, DiskAnnSearchCtx) and shared helper 
 ```
 
 This was verified from `nodeBinReplaceEdge()` (line 419-420):
+
 - Distance written at `edgeMetaOffset + sizeof(u32)` (offset 4)
 - Rowid written at `edgeMetaOffset + sizeof(u64)` (offset 8)
-And `edgeMetadataSize()` returns `sizeof(u64) + sizeof(u64)` = 16.
+  And `edgeMetadataSize()` returns `sizeof(u64) + sizeof(u64)` = 16.
 
 **Critical: `nodeEdgesMetadataOffset`** — Edge metadata isn't contiguous with edge vectors.
 The metadata section starts after ALL edge vector slots (even unused ones). Get this
 offset wrong and everything corrupts silently. See `diskann.c` lines 327-333.
 
 **Max edges per node** depends on block_size, vector dimensions:
+
 - Formula: `(block_size - nodeOverhead) / edgeOverhead`
 - nodeOverhead = nodeMetadataSize(16) + nNodeVectorSize
 - edgeOverhead = nEdgeVectorSize + edgeMetadataSize(16)
@@ -91,6 +96,7 @@ offset wrong and everything corrupts silently. See `diskann.c` lines 327-333.
 - Realistic configs need larger block sizes
 
 **libSQL type replacements:**
+
 - `u8` → `uint8_t`
 - `u16` → `uint16_t`
 - `u32` → `uint32_t`
@@ -101,10 +107,11 @@ offset wrong and everything corrupts silently. See `diskann.c` lines 327-333.
 
 **DiskAnnIndex needs additional fields for node layout** (currently missing from
 `diskann_internal.h`):
+
 - `nNodeVectorSize` (uint32_t) — `dims * sizeof(float)` for float32
 - `nEdgeVectorSize` (uint32_t) — same as nNodeVectorSize for float32-only
 - `pruning_alpha` (double) — edge pruning threshold, default 1.2
-These are derived from existing config fields at open time.
+  These are derived from existing config fields at open time.
 
 **VectorPair is eliminated.** For float32-only, node and edge vectors are the same type.
 `DiskAnnSearchCtx.query` becomes `float *query_data` + dims (from index config).
@@ -112,11 +119,13 @@ These are derived from existing config fields at open time.
 ## Solutions
 
 ### Option 1: Single `diskann_node.h/.c` module ⭐ CHOSEN
+
 **Pros:** All node-level operations in one place, simple to test
 **Cons:** File may grow large
 **Status:** Chosen — natural cohesion, everything operates on the same BLOB layout
 
 ### Option 2: Split into separate files (node, distance, serialization)
+
 **Pros:** Smaller files
 **Cons:** Over-engineering for ~350 LOC total, more headers to manage
 **Status:** Rejected — premature splitting
@@ -138,7 +147,7 @@ These are derived from existing config fields at open time.
   - **Note:** DiskAnnSearchCtx deferred — will be defined when implementing search
 - [x] Implement node binary functions in `src/diskann_node.c`:
   - `node_bin_init()` — Initialize node BLOB with rowid + vector (memcpy)
-  - `node_bin_vector()` — Return const float* pointer into BLOB buffer (zero-copy)
+  - `node_bin_vector()` — Return const float\* pointer into BLOB buffer (zero-copy)
   - `node_bin_edges()` — Read edge count from BLOB
   - `node_bin_edge()` — Read edge at index (rowid, distance, vector pointer)
   - `node_bin_edge_find_idx()` — Find edge by target rowid
@@ -165,6 +174,7 @@ These are derived from existing config fields at open time.
 - [x] Wire into Makefile and test_runner.c
 
 **Verification:**
+
 ```bash
 make test      # All tests pass (existing + new)
 make asan      # No memory errors

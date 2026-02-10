@@ -15,8 +15,8 @@ the shared beam search used by both search AND insert.
 - [x] Test-First Development
 - [x] Implementation
 - [x] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Cleanup & Documentation
+- [x] Final Review
 
 ## Required Reading
 
@@ -40,8 +40,7 @@ the shared beam search used by both search AND insert.
 - **Constraints:** Must use standalone types from `20250209-shared-graph-types.md`
   (DiskAnnNode, DiskAnnSearchCtx, distance functions, nodeBin* helpers). Must use
   existing BlobSpot layer for BLOB I/O. Search is read-only — uses
-  `is_writable=0` mode with a single reusable BlobSpot. All vector data is `float*`
-  (not libSQL's `Vector*` type) since we are float32-only.
+  `is_writable=0` mode with a single reusable BlobSpot. All vector data is `float*`(not libSQL's`Vector\*` type) since we are float32-only.
 - **Success Criteria:**
   - `diskann_search()` returns correct k-NN results on small test datasets
   - Results match brute-force reference for known vectors
@@ -53,6 +52,7 @@ the shared beam search used by both search AND insert.
 ## Tribal Knowledge
 
 **The beam search algorithm (`diskAnnSearchInternal`):**
+
 1. Start from a random node (or medoid if stored)
 2. Maintain sorted candidate queue (by approximate distance, ascending)
 3. Pop closest unvisited candidate, load its BLOB, read its edges
@@ -62,6 +62,7 @@ the shared beam search used by both search AND insert.
 7. Stop when no unvisited candidates remain
 
 **Read-only vs writable blob mode:**
+
 - Search uses `is_writable=0`: single `BlobSpot` reused via `blob_spot_reload()` for each
   candidate. Memory-efficient — only one BLOB buffer alive at a time.
 - Insert uses `is_writable=1`: separate `BlobSpot` per visited node (needs to write edges later).
@@ -73,15 +74,18 @@ the shared beam search used by both search AND insert.
   `#define DISKANN_BLOB_READONLY 0` / `#define DISKANN_BLOB_WRITABLE 1`.
 
 **Approximate vs exact distance:**
+
 - Edge vectors may be compressed (lower precision than node vectors)
 - Queue ordering uses approximate distance (from edge vectors) — fast but imprecise
 - Top-K list uses exact distance (from full node vectors) — accurate results
 - For float32-only (no compression), these are identical
 
 **Random start node:** `diskAnnSelectRandomShadowRow()` picks a random row using:
+
 ```sql
 SELECT rowid FROM shadow LIMIT 1 OFFSET ABS(RANDOM()) % MAX((SELECT COUNT(*) FROM shadow), 1)
 ```
+
 This avoids `ORDER BY RANDOM()` (which sorts the whole table) but is still O(n) due to the
 `COUNT(*)` subquery plus the OFFSET scan. Consider caching or storing a medoid entry point
 in metadata for large indexes.
@@ -90,6 +94,7 @@ in metadata for large indexes.
 First check with `diskAnnSelectRandomShadowRow()` which returns `SQLITE_DONE` if empty.
 
 **Search context memory management:**
+
 - `aCandidates` and `aDistances` are parallel `float` arrays, allocated to `maxCandidates` size
   - **Bug in original:** libSQL allocates these with `sizeof(double)` but uses as `float*`.
     Our extraction must use `sizeof(float)` consistently.
@@ -128,11 +133,13 @@ branch can be omitted.
 ## Solutions
 
 ### Option 1: Extract into `src/diskann_search.c` ⭐ CHOSEN
+
 **Pros:** Clean separation, search is a natural module boundary
 **Cons:** Shares `diskAnnSearchInternal` with insert (future)
 **Status:** Chosen — expose searchInternal via internal header for insert to use later
 
 ### Option 2: Keep search in `diskann_api.c`
+
 **Pros:** Fewer files
 **Cons:** `diskann_api.c` would grow huge, mixes lifecycle + algorithm code
 **Status:** Rejected
@@ -150,6 +157,7 @@ branch can be omitted.
 ### `DiskAnnSearchCtx` struct (in `diskann_search.h`)
 
 Simplified from original (no VectorPair, float-only, query is borrowed not owned):
+
 ```c
 typedef struct DiskAnnSearchCtx {
   const float *query;              /* borrowed, not owned */
@@ -170,11 +178,13 @@ typedef struct DiskAnnSearchCtx {
 ### Function visibility
 
 **Exposed via `diskann_search.h`** (4 — needed by future insert):
+
 - `diskann_search_ctx_init()` / `diskann_search_ctx_deinit()`
 - `diskann_select_random_shadow_row()`
 - `diskann_search_internal()`
 
 **Static in `diskann_search.c`** (9 — internal to beam search):
+
 - `search_ctx_is_visited`, `search_ctx_has_candidate`
 - `search_ctx_should_add` — delegates to `distance_buffer_insert_idx()` from `diskann_node.h` (DRY)
 - `search_ctx_mark_visited`, `search_ctx_has_unvisited`
@@ -182,6 +192,7 @@ typedef struct DiskAnnSearchCtx {
 - `search_ctx_insert_candidate`, `search_ctx_find_closest_unvisited`
 
 **Public (declared in `diskann.h`, defined in `diskann_search.c`):**
+
 - `diskann_search()` — replaces stub in `diskann_api.c`
 
 ### Key design decisions
@@ -243,6 +254,7 @@ typedef struct DiskAnnSearchCtx {
 - [x] Delete `diskann_search()` stub from `src/diskann_api.c`
 
 **Verification:**
+
 ```bash
 make test      # All tests pass
 make asan      # No memory errors
@@ -283,6 +295,7 @@ achieves ≥80% recall@5.
 
 **For insert TPP:** `diskann_search_internal` is exposed via `diskann_search.h` with
 `DISKANN_BLOB_WRITABLE` mode. Insert will need to:
+
 1. Call `diskann_search_ctx_init` with `DISKANN_BLOB_WRITABLE` and `insertL` beam width
 2. Call `diskann_search_internal` to find nearest neighbors
 3. Access `ctx.visited_list` to get visited nodes (which have loaded writable BlobSpots)
