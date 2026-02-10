@@ -87,18 +87,18 @@ source file does. Moving `diskann.c` to `_research/` is safe.
 
 **Test coverage gap analysis — what's already covered vs what's missing:**
 
-| Scenario                        | Existing Coverage                                                    | Gap?                         |
-| ------------------------------- | -------------------------------------------------------------------- | ---------------------------- |
-| Search empty index              | `test_search_empty_index`                                            | No                           |
-| Insert wrong dimensions         | `test_insert_dimension_mismatch`                                     | No                           |
-| Delete nonexistent              | `test_delete_nonexistent_id`                                         | No                           |
-| Drop → open fails               | `test_drop_index_removes_shadow_table` + `test_open_index_not_found` | No                           |
-| Insert → delete → search        | `test_insert_delete_search` + `test_integration_delete_at_scale`     | **Covered**                  |
-| Recall (brute-force comparison) | `test_insert_recall` + `test_integration_recall_128d`                | **Covered**                  |
-| Reopen persistence              | `test_integration_reopen_persistence`                                | **Covered**                  |
-| Clear → reinsert → search       | `test_integration_clear_reinsert`                                    | **Covered**                  |
-| Higher-dim recall               | `test_integration_recall_128d`                                       | **Covered**                  |
-| Larger delete+search            | `test_integration_delete_at_scale`                                   | **Covered**                  |
+| Scenario                        | Existing Coverage                                                    | Gap?        |
+| ------------------------------- | -------------------------------------------------------------------- | ----------- |
+| Search empty index              | `test_search_empty_index`                                            | No          |
+| Insert wrong dimensions         | `test_insert_dimension_mismatch`                                     | No          |
+| Delete nonexistent              | `test_delete_nonexistent_id`                                         | No          |
+| Drop → open fails               | `test_drop_index_removes_shadow_table` + `test_open_index_not_found` | No          |
+| Insert → delete → search        | `test_insert_delete_search` + `test_integration_delete_at_scale`     | **Covered** |
+| Recall (brute-force comparison) | `test_insert_recall` + `test_integration_recall_128d`                | **Covered** |
+| Reopen persistence              | `test_integration_reopen_persistence`                                | **Covered** |
+| Clear → reinsert → search       | `test_integration_clear_reinsert`                                    | **Covered** |
+| Higher-dim recall               | `test_integration_recall_128d`                                       | **Covered** |
+| Larger delete+search            | `test_integration_delete_at_scale`                                   | **Covered** |
 
 **Recall target of 95% may be aggressive with random start.** The existing
 `test_insert_recall` only requires 60% on 50 vectors/3D. For 200+ vectors at 128D with
@@ -225,8 +225,10 @@ are separate projects.
 4. Mark all remaining phases complete and move this TPP to `_done/`.
 
 **Files created this session:**
+
 - `tests/c/test_integration.c` — 4 integration tests (reopen, clear+reinsert, 128D recall, delete at scale)
 
 **Files modified this session:**
+
 - `tests/c/test_runner.c` — added 4 extern declarations + RUN_TEST calls
 - `_todo/20250209-extraction-complete.md` — this file (validated and updated throughout)
