@@ -147,8 +147,8 @@ PhotoStructure needs ANN vector search for millions of CLIP embeddings. Current 
 **Copyright compliance implemented:**
 
 - Added copyright guidelines to CLAUDE.md
-- Derived files must retain: `Original Copyright 2024 the libSQL authors`
-- Add: `Modifications Copyright 2026 PhotoStructure Inc.`
+- Derived files must retain: `Copyright 2024 the libSQL authors`
+- Add: `Copyright 2026 PhotoStructure Inc.`
 - NEVER claim sole copyright on derived code
 
 **Implementation design completed:**

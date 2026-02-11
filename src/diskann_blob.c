@@ -2,8 +2,8 @@
 ** DiskANN BLOB I/O Layer Implementation
 **
 ** Derived from libSQL DiskANN implementation
-** Original Copyright 2024 the libSQL authors
-** Modifications Copyright 2026 PhotoStructure Inc.
+** Copyright 2024 the libSQL authors
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
 #include "diskann_blob.h"

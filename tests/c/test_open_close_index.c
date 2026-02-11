@@ -2,8 +2,8 @@
 ** Tests for diskann_open_index() and diskann_close_index()
 **
 ** Derived from libSQL DiskANN implementation
-** Original Copyright 2024 the libSQL authors
-** Modifications Copyright 2026 PhotoStructure Inc.
+** Copyright 2024 the libSQL authors
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
 #include "../../src/diskann.h"

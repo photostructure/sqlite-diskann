@@ -2,8 +2,8 @@
 ** DiskANN Search — k-NN beam search implementation
 **
 ** Derived from libSQL DiskANN implementation
-** Original Copyright 2024 the libSQL authors
-** Modifications Copyright 2026 PhotoStructure Inc.
+** Copyright 2024 the libSQL authors
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
 #include "diskann_search.h"

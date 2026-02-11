@@ -2,8 +2,8 @@
 ** DiskANN BLOB I/O Layer
 **
 ** Derived from libSQL DiskANN implementation
-** Original Copyright 2024 the libSQL authors
-** Modifications Copyright 2026 PhotoStructure Inc.
+** Copyright 2024 the libSQL authors
+** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 **
 ** This module provides utilities for reading/writing graph nodes as BLOBs

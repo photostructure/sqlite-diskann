@@ -4,8 +4,8 @@
 ** Public API for standalone SQLite extension
 **
 ** Derived from libSQL DiskANN implementation
-** Original Copyright 2024 the libSQL authors
-** Modifications Copyright 2026 PhotoStructure Inc.
+** Copyright 2024 the libSQL authors
+** Copyright 2026 PhotoStructure Inc.
 **
 ** Permission is hereby granted, free of charge, to any person obtaining a copy
 ** of this software and associated documentation files (the "Software"), to deal
