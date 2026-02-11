@@ -26,10 +26,14 @@
 
 /* Platform-specific headers for file operations */
 #ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS /* Suppress MSVC warnings for getenv */
 #include <io.h>
+#include <process.h> /* For _getpid */
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <windows.h> /* For QueryPerformanceCounter */
 #define unlink _unlink
+#define getpid _getpid
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -113,9 +117,23 @@ static void cleanup_temp_files(void) {
 ** Get current time in milliseconds (monotonic)
 */
 static double get_time_ms(void) {
+#ifdef _WIN32
+  static LARGE_INTEGER frequency;
+  static int initialized = 0;
+  LARGE_INTEGER counter;
+
+  if (!initialized) {
+    QueryPerformanceFrequency(&frequency);
+    initialized = 1;
+  }
+
+  QueryPerformanceCounter(&counter);
+  return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+#else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+#endif
 }
 
 /*
