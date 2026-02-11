@@ -106,6 +106,7 @@ db.exec("DROP TABLE embeddings");
 **Virtual table features**:
 
 See [USAGE.md](./USAGE.md) for:
+
 - Examples with better-sqlite3 and node:sqlite
 - Metadata columns and filtered search
 - MATCH operator syntax and query patterns

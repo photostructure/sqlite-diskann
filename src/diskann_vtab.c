@@ -26,6 +26,11 @@
 ** This is required for multi-file extensions - do not remove. */
 #define DISKANN_VTAB_MAIN
 
+/* Suppress MSVC sscanf warnings - our buffers are sized correctly */
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "diskann.h"
 #include "diskann_internal.h"
 #include "diskann_sqlite.h"

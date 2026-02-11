@@ -15,7 +15,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Platform-specific headers for file operations */
+#ifdef _WIN32
+#include <io.h>
+#define unlink _unlink
+#else
 #include <unistd.h>
+#endif
 
 #include "../../src/diskann.h"
 

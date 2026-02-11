@@ -22,9 +22,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
+
+/* Platform-specific headers for file operations */
+#ifdef _WIN32
+#include <io.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#define unlink _unlink
+#else
+#include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #include "../../src/diskann.h"
 #include "../../src/diskann_internal.h"
