@@ -15,6 +15,12 @@
 ** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
+
+/* Must be first - suppress MSVC warnings before any includes */
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #define _POSIX_C_SOURCE 199309L
 #include "unity/unity.h"
 #include <sqlite3.h>
@@ -26,7 +32,6 @@
 
 /* Platform-specific headers for file operations */
 #ifdef _WIN32
-#define _CRT_SECURE_NO_WARNINGS /* Suppress MSVC warnings for getenv */
 #include <io.h>
 #include <process.h> /* For _getpid */
 #include <sys/types.h>
