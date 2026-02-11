@@ -31,6 +31,8 @@
 #include "diskann_sqlite.h"
 #include "diskann_util.h"
 #include <assert.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,6 +154,29 @@ static int is_valid_meta_type(const char *type) {
          sqlite3_stricmp(type, "INTEGER") == 0 ||
          sqlite3_stricmp(type, "REAL") == 0 ||
          sqlite3_stricmp(type, "BLOB") == 0;
+}
+
+/*
+** Parse a string as uint32_t with error checking.
+** Returns 0 on success, -1 on error.
+*/
+static int parse_uint32(const char *str, uint32_t *out) {
+  char *endptr;
+  errno = 0;
+  long val = strtol(str, &endptr, 10);
+
+  /* Check for conversion errors */
+  if (errno != 0 || endptr == str || *endptr != '\0') {
+    return -1;
+  }
+
+  /* Check range for uint32_t */
+  if (val < 0 || val > UINT32_MAX) {
+    return -1;
+  }
+
+  *out = (uint32_t)val;
+  return 0;
 }
 
 /*
@@ -339,7 +364,10 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
 
     if (sscanf(param, "%63[^=]=%63s", key, value) == 2) {
       if (strcmp(key, "dimension") == 0) {
-        config.dimensions = (uint32_t)atoi(value);
+        if (parse_uint32(value, &config.dimensions) != 0) {
+          *pzErr = sqlite3_mprintf("diskann: invalid dimension '%s'", value);
+          return SQLITE_ERROR;
+        }
       } else if (strcmp(key, "metric") == 0) {
         int metric = parse_metric(value);
         if (metric < 0) {
@@ -348,9 +376,16 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
         }
         config.metric = (uint8_t)metric;
       } else if (strcmp(key, "max_degree") == 0) {
-        config.max_neighbors = (uint32_t)atoi(value);
+        if (parse_uint32(value, &config.max_neighbors) != 0) {
+          *pzErr = sqlite3_mprintf("diskann: invalid max_degree '%s'", value);
+          return SQLITE_ERROR;
+        }
       } else if (strcmp(key, "build_search_list_size") == 0) {
-        config.search_list_size = (uint32_t)atoi(value);
+        if (parse_uint32(value, &config.search_list_size) != 0) {
+          *pzErr = sqlite3_mprintf(
+              "diskann: invalid build_search_list_size '%s'", value);
+          return SQLITE_ERROR;
+        }
         config.insert_list_size = config.search_list_size * 2;
       }
     }

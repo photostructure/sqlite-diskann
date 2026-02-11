@@ -22,7 +22,8 @@ $Sources = @(
     "$SrcDir/diskann_blob.c",
     "$SrcDir/diskann_insert.c",
     "$SrcDir/diskann_node.c",
-    "$SrcDir/diskann_search.c"
+    "$SrcDir/diskann_search.c",
+    "$SrcDir/diskann_vtab.c"
 )
 
 $TestSources = Get-ChildItem "$TestDir/c/test_*.c" | Where-Object { $_.Name -ne "test_runner.c" } | ForEach-Object { $_.FullName }
