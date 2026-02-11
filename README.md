@@ -55,7 +55,9 @@ npm install better-sqlite3
 
 ## Quick Start
 
-### With @photostructure/sqlite
+### Virtual Table Interface (Recommended)
+
+The virtual table interface provides standard SQL operations with full query planner integration:
 
 ```typescript
 import { DatabaseSync } from "@photostructure/sqlite";
@@ -64,25 +66,43 @@ import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
 const db = new DatabaseSync(":memory:", { allowExtension: true });
 loadDiskAnnExtension(db);
 
-// Create index for 128-dimensional vectors
+// Create virtual table for 128-dimensional vectors
 db.exec(`
-  SELECT diskann_create('my_index', 'my_db', 128, 64, 1.2, 32);
+  CREATE VIRTUAL TABLE embeddings USING diskann(
+    dimension=128,
+    metric=cosine
+  )
 `);
 
-// Insert vector
+// Insert vectors with explicit rowid
 const vector = new Float32Array(128);
-db.prepare("SELECT diskann_insert(?, ?, ?)").run("my_index", "my_db", 1, vector);
+db.prepare("INSERT INTO embeddings(rowid, vector) VALUES (?, ?)").run(1, vector);
 
-// Search for 10 nearest neighbors
+// Search for 10 nearest neighbors using MATCH operator
 const results = db
   .prepare(
     `
-  SELECT rowid, distance
-  FROM diskann_search('my_index', 'my_db', ?, 10, 100)
-`
+    SELECT rowid, distance
+    FROM embeddings
+    WHERE vector MATCH ? AND k = 10
+  `
   )
   .all(vector);
+
+// Delete a vector
+db.prepare("DELETE FROM embeddings WHERE rowid = ?").run(1);
+
+// Drop the entire index
+db.exec("DROP TABLE embeddings");
 ```
+
+**Virtual table features**:
+
+- Standard SQL INSERT/DELETE/DROP operations
+- MATCH operator for ANN search with `k` parameter
+- LIMIT support for capping results
+- Automatic shadow table management
+- Full transactional consistency
 
 ### With better-sqlite3
 
@@ -93,13 +113,21 @@ import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
 const db = new Database(":memory:");
 loadDiskAnnExtension(db);
 
-// Now you can use DiskANN functions
+// Create virtual table
 db.exec(`
   CREATE VIRTUAL TABLE embeddings USING diskann(
     dimension=512,
     metric=cosine
   )
 `);
+
+// Insert and search work the same as above
+const vector = new Float32Array(512);
+db.prepare("INSERT INTO embeddings(rowid, vector) VALUES (?, ?)").run(1, vector);
+
+const results = db
+  .prepare("SELECT rowid, distance FROM embeddings WHERE vector MATCH ? AND k = 10")
+  .all(vector);
 ```
 
 ### With node:sqlite (Node 22.5+, experimental)
@@ -111,14 +139,47 @@ import { loadDiskAnnExtension } from "@photostructure/sqlite-diskann";
 const db = new DatabaseSync(":memory:", { allowExtension: true });
 loadDiskAnnExtension(db);
 
-// Now you can use DiskANN functions
+// Create virtual table
 db.exec(`
   CREATE VIRTUAL TABLE embeddings USING diskann(
     dimension=512,
     metric=cosine
   )
 `);
+
+// Insert and search work the same as above
+const vector = new Float32Array(512);
+db.prepare("INSERT INTO embeddings(rowid, vector) VALUES (?, ?)").run(1, vector);
+
+const results = db
+  .prepare("SELECT rowid, distance FROM embeddings WHERE vector MATCH ? AND k = 10")
+  .all(vector);
 ```
+
+### C API (Advanced)
+
+For direct C API usage, the lower-level functions are still available:
+
+```c
+// Create index
+diskann_create_index(db, "main", "my_index", &config);
+
+// Open index
+DiskAnnIndex *idx;
+diskann_open_index(db, "main", "my_index", &idx);
+
+// Insert vector
+diskann_insert(idx, rowid, vector, dims);
+
+// Search
+DiskAnnResult results[10];
+int count = diskann_search(idx, query, dims, 10, results);
+
+// Close
+diskann_close_index(idx);
+```
+
+See [`src/diskann.h`](./src/diskann.h) for full C API documentation.
 
 ## Why DiskANN?
 
@@ -134,32 +195,36 @@ See [`_research/sqlite-vector-options.md`](./_research/sqlite-vector-options.md)
 
 ## API Reference
 
-### C API
+### Virtual Table SQL
 
-```c
-// Create index
-int diskann_create(const char *index_name, const char *db_name,
-                   int vector_dim, int max_neighbors,
-                   float pruning_alpha, int search_list_size);
+```sql
+-- Create index for N-dimensional vectors
+CREATE VIRTUAL TABLE table_name USING diskann(
+  dimension=N,              -- Required: vector dimensionality
+  metric=euclidean|cosine|dot,  -- Optional: distance metric (default: cosine)
+  max_degree=64,            -- Optional: max graph degree (default: 64)
+  build_search_list_size=100    -- Optional: search quality (default: 100)
+);
 
-// Insert vector
-int diskann_insert(const char *index_name, const char *db_name,
-                   sqlite3_int64 rowid, const float *vector);
+-- Insert vector (rowid required, no auto-increment)
+INSERT INTO table_name(rowid, vector) VALUES (?, ?);
 
-// Search
-int diskann_search(const char *index_name, const char *db_name,
-                   const float *query, int k, int search_list_size,
-                   diskann_search_result **results, int *result_count);
+-- Search for k nearest neighbors using MATCH operator
+SELECT rowid, distance
+FROM table_name
+WHERE vector MATCH ? AND k = ?
+LIMIT ?;  -- Optional: caps result count
 
-// Delete vector
-int diskann_delete(const char *index_name, const char *db_name,
-                   sqlite3_int64 rowid);
+-- Delete vector
+DELETE FROM table_name WHERE rowid = ?;
 
-// Destroy index
-int diskann_destroy(const char *index_name, const char *db_name);
+-- Drop entire index
+DROP TABLE table_name;
 ```
 
-Full API: [`src/diskann.h`](./src/diskann.h)
+### C API
+
+For advanced usage, see [`src/diskann.h`](./src/diskann.h) for the full C API.
 
 ## Building from Source
 
@@ -171,8 +236,8 @@ sudo apt-get install build-essential clang-tidy valgrind
 make all
 
 # Test
-make test        # C unit tests (126 tests)
-make test-stress # Stress tests (300k/100k vectors, ~30 min)
+make test        # C unit tests
+make test-stress # Stress tests (~30 min)
 make asan        # AddressSanitizer
 make valgrind    # Memory leak detection
 npm test         # TypeScript tests

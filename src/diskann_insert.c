@@ -192,7 +192,11 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
 
   /* Begin SAVEPOINT before search — writable blob handles require an
    * active transaction, and SAVEPOINT must be started before any blob
-   * opens to avoid SQLITE_BUSY. */
+   * opens to avoid SQLITE_BUSY.
+   *
+   * When called from vtab xUpdate, there's already an active SQL statement
+   * so SAVEPOINT fails with SQLITE_BUSY. That's OK — the vtab's implicit
+   * transaction provides atomicity for shadow table operations. */
   savepoint_sql =
       sqlite3_mprintf("SAVEPOINT diskann_insert_%s", idx->index_name);
   if (!savepoint_sql) {
@@ -202,10 +206,11 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
 
   sqlite3_free(savepoint_sql);
   savepoint_sql = NULL;
-  if (rc != SQLITE_OK) {
-    return DISKANN_ERROR;
+  if (rc == SQLITE_OK) {
+    savepoint_active = 1;
   }
-  savepoint_active = 1;
+  /* If SAVEPOINT failed (e.g., SQLITE_BUSY from vtab context), continue
+   * without it — the caller's transaction provides atomicity. */
 
   /* Search for neighbors (skip if first node) */
   if (!first) {

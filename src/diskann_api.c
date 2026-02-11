@@ -415,15 +415,20 @@ int diskann_delete(DiskAnnIndex *idx, int64_t id) {
   if (!idx)
     return DISKANN_ERROR_INVALID;
 
-  /* Begin SAVEPOINT for atomicity */
+  /* Begin SAVEPOINT for atomicity.
+   * When called from vtab xUpdate, there's already an active SQL statement
+   * so SAVEPOINT fails with SQLITE_BUSY. That's OK — the vtab's implicit
+   * transaction provides atomicity. */
+  int savepoint_active = 0;
   sql = sqlite3_mprintf("SAVEPOINT diskann_delete_%s", idx->index_name);
   if (!sql)
     return DISKANN_ERROR_NOMEM;
   rc = sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
   sqlite3_free(sql);
   sql = NULL;
-  if (rc != SQLITE_OK)
-    return DISKANN_ERROR;
+  if (rc == SQLITE_OK) {
+    savepoint_active = 1;
+  }
 
   /* Open read-only BlobSpot for target node */
   rc = blob_spot_create(idx, &target_blob, (uint64_t)id, idx->block_size,
@@ -515,15 +520,17 @@ int diskann_delete(DiskAnnIndex *idx, int64_t id) {
   }
 
   /* Release SAVEPOINT — commit */
-  sql = sqlite3_mprintf("RELEASE diskann_delete_%s", idx->index_name);
-  if (!sql) {
-    rc = DISKANN_ERROR_NOMEM;
-    goto rollback;
+  if (savepoint_active) {
+    sql = sqlite3_mprintf("RELEASE diskann_delete_%s", idx->index_name);
+    if (!sql) {
+      rc = DISKANN_ERROR_NOMEM;
+      goto rollback;
+    }
+    rc = sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
+    sqlite3_free(sql);
+    return (rc == SQLITE_OK) ? DISKANN_OK : DISKANN_ERROR;
   }
-  rc = sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
-  sqlite3_free(sql);
-
-  return (rc == SQLITE_OK) ? DISKANN_OK : DISKANN_ERROR;
+  return DISKANN_OK;
 
 rollback:
   if (target_blob)
@@ -533,12 +540,14 @@ rollback:
   if (stmt)
     sqlite3_finalize(stmt);
 
-  sql = sqlite3_mprintf("ROLLBACK TO diskann_delete_%s; "
-                        "RELEASE diskann_delete_%s",
-                        idx->index_name, idx->index_name);
-  if (sql) {
-    sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
-    sqlite3_free(sql);
+  if (savepoint_active) {
+    sql = sqlite3_mprintf("ROLLBACK TO diskann_delete_%s; "
+                          "RELEASE diskann_delete_%s",
+                          idx->index_name, idx->index_name);
+    if (sql) {
+      sqlite3_exec(idx->db, sql, NULL, NULL, NULL);
+      sqlite3_free(sql);
+    }
   }
   return rc;
 }

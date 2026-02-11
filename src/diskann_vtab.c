@@ -4,8 +4,18 @@
 ** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 **
-** Minimal virtual table that wraps the DiskANN C API.
-** Supports CREATE, INSERT, SELECT (search), DELETE.
+** Wraps the DiskANN C API as a SQLite virtual table.
+** Supports CREATE, INSERT, SELECT (MATCH search), DELETE, DROP.
+**
+** Schema: CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN)
+** All columns HIDDEN. rowid via xRowid. MATCH on vector col for ANN search.
+**
+** Usage:
+**   CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean);
+**   INSERT INTO t(rowid, vector) VALUES (1, X'...');
+**   SELECT rowid, distance FROM t WHERE vector MATCH ?query AND k = 10;
+**   DELETE FROM t WHERE rowid = 1;
+**   DROP TABLE t;
 */
 
 /* Mark this as the main file that defines sqlite3_api (not extern).
@@ -26,28 +36,44 @@
 SQLITE_EXTENSION_INIT1
 #endif
 
+/* xBestIndex idxNum bitmask */
+#define DISKANN_IDX_MATCH 0x01
+#define DISKANN_IDX_K 0x02
+#define DISKANN_IDX_LIMIT 0x04
+#define DISKANN_IDX_ROWID 0x08
+
+/* Column indices in the vtab schema */
+#define DISKANN_COL_VECTOR 0
+#define DISKANN_COL_DISTANCE 1
+#define DISKANN_COL_K 2
+
 /* Virtual table structure */
 typedef struct diskann_vtab {
   sqlite3_vtab base;
   sqlite3 *db;
   char *db_name;
   char *table_name;
-  DiskAnnIndex *idx; /* Opened index (kept open for performance) */
+  DiskAnnIndex *idx;   /* Opened index (kept open for performance) */
+  uint32_t dimensions; /* Cached from idx for dim validation in xUpdate */
 } diskann_vtab;
 
 /* Cursor structure for iteration */
 typedef struct diskann_cursor {
   sqlite3_vtab_cursor base;
-  DiskAnnResult *results; /* Search results */
-  int num_results;        /* Number of results */
-  int current;            /* Current position in results */
+  DiskAnnResult *results; /* Search results (sqlite3_malloc'd) */
+  int num_results;        /* Actual count from diskann_search() */
+  int current;            /* Current position (0-based) */
 } diskann_cursor;
 
 /* Forward declarations */
+static int diskannCreate(sqlite3 *db, void *pAux, int argc,
+                         const char *const *argv, sqlite3_vtab **ppVtab,
+                         char **pzErr);
 static int diskannConnect(sqlite3 *db, void *pAux, int argc,
                           const char *const *argv, sqlite3_vtab **ppVtab,
                           char **pzErr);
 static int diskannDisconnect(sqlite3_vtab *pVtab);
+static int diskannDestroy(sqlite3_vtab *pVtab);
 static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo);
 static int diskannOpen(sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCursor);
 static int diskannClose(sqlite3_vtab_cursor *pCursor);
@@ -60,9 +86,10 @@ static int diskannColumn(sqlite3_vtab_cursor *pCursor, sqlite3_context *ctx,
 static int diskannRowid(sqlite3_vtab_cursor *pCursor, sqlite_int64 *pRowid);
 static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
                          sqlite_int64 *pRowid);
+static int diskannShadowName(const char *zName);
 
 /*
-** Parse metric string to enum
+** Parse metric string to enum. Returns -1 on unknown metric.
 */
 static int parse_metric(const char *str) {
   if (strcmp(str, "cosine") == 0)
@@ -75,23 +102,55 @@ static int parse_metric(const char *str) {
 }
 
 /*
-** CREATE VIRTUAL TABLE handler
-**
-** Syntax:
-**   CREATE VIRTUAL TABLE name USING diskann(
-**     dimension=128,
-**     metric=cosine,
-**     max_degree=64,
-**     build_search_list_size=100,
-**     normalize_vectors=0
-**   )
+** Shared init helper for xCreate and xConnect.
+** Declares the vtab schema, allocates the vtab struct, populates fields.
 */
-static int diskannConnect(sqlite3 *db, void *pAux, int argc,
-                          const char *const *argv, sqlite3_vtab **ppVtab,
-                          char **pzErr) {
-  diskann_vtab *pVtab;
-  DiskAnnConfig config;
+static int vtab_init(sqlite3 *db, const char *db_name, const char *table_name,
+                     DiskAnnIndex *idx, sqlite3_vtab **ppVtab, char **pzErr) {
   int rc;
+
+  rc = sqlite3_declare_vtab(
+      db, "CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN)");
+  if (rc != SQLITE_OK) {
+    *pzErr = sqlite3_mprintf("diskann: declare_vtab failed");
+    return rc;
+  }
+
+  diskann_vtab *pVtab = sqlite3_malloc(sizeof(*pVtab));
+  if (!pVtab) {
+    return SQLITE_NOMEM;
+  }
+  memset(pVtab, 0, sizeof(*pVtab));
+
+  pVtab->db = db;
+  pVtab->db_name = sqlite3_mprintf("%s", db_name);
+  pVtab->table_name = sqlite3_mprintf("%s", table_name);
+  pVtab->idx = idx;
+  pVtab->dimensions = idx->dimensions;
+
+  if (!pVtab->db_name || !pVtab->table_name) {
+    sqlite3_free(pVtab->db_name);
+    sqlite3_free(pVtab->table_name);
+    sqlite3_free(pVtab);
+    return SQLITE_NOMEM;
+  }
+
+  *ppVtab = &pVtab->base;
+  return SQLITE_OK;
+}
+
+/*
+** xCreate — called for CREATE VIRTUAL TABLE.
+** Parses config from argv, creates shadow tables, opens index.
+*/
+static int diskannCreate(sqlite3 *db, void *pAux, int argc,
+                         const char *const *argv, sqlite3_vtab **ppVtab,
+                         char **pzErr) {
+  DiskAnnConfig config;
+  DiskAnnIndex *idx = NULL;
+  int rc;
+
+  (void)pAux;
 
   /* Default configuration */
   config.dimensions = 0; /* Required */
@@ -101,11 +160,6 @@ static int diskannConnect(sqlite3 *db, void *pAux, int argc,
   config.insert_list_size = 200;
   config.block_size = 4096;
 
-  (void)pAux;
-
-  /* Parse arguments: argv[0]=module, argv[1]=db, argv[2]=table,
-   * argv[3..]=params
-   */
   if (argc < 3) {
     *pzErr = sqlite3_mprintf("diskann: missing arguments");
     return SQLITE_ERROR;
@@ -135,7 +189,6 @@ static int diskannConnect(sqlite3 *db, void *pAux, int argc,
         config.search_list_size = (uint32_t)atoi(value);
         config.insert_list_size = config.search_list_size * 2;
       }
-      /* Ignore normalize_vectors for now - not part of C API */
     }
   }
 
@@ -144,100 +197,176 @@ static int diskannConnect(sqlite3 *db, void *pAux, int argc,
     return SQLITE_ERROR;
   }
 
-  /* Create index */
+  /* Create index (shadow tables + metadata) */
   rc = diskann_create_index(db, db_name, table_name, &config);
   if (rc != DISKANN_OK && rc != DISKANN_ERROR_EXISTS) {
-    *pzErr = sqlite3_mprintf("diskann: failed to create index");
+    *pzErr = sqlite3_mprintf("diskann: failed to create index (rc=%d)", rc);
     return SQLITE_ERROR;
   }
-
-  /* Allocate vtab structure */
-  pVtab = sqlite3_malloc(sizeof(*pVtab));
-  if (!pVtab) {
-    return SQLITE_NOMEM;
-  }
-  memset(pVtab, 0, sizeof(*pVtab));
-
-  pVtab->db = db;
-  pVtab->db_name = sqlite3_mprintf("%s", db_name);
-  pVtab->table_name = sqlite3_mprintf("%s", table_name);
 
   /* Open the index */
-  rc = diskann_open_index(db, db_name, table_name, &pVtab->idx);
+  rc = diskann_open_index(db, db_name, table_name, &idx);
   if (rc != DISKANN_OK) {
-    sqlite3_free(pVtab->db_name);
-    sqlite3_free(pVtab->table_name);
-    sqlite3_free(pVtab);
-    *pzErr = sqlite3_mprintf("diskann: failed to open index");
+    *pzErr = sqlite3_mprintf("diskann: failed to open index (rc=%d)", rc);
     return SQLITE_ERROR;
   }
 
-  /* Declare schema: (rowid INTEGER PRIMARY KEY, vector BLOB) */
-  rc = sqlite3_declare_vtab(
-      db, "CREATE TABLE x(rowid INTEGER PRIMARY KEY, vector BLOB)");
+  rc = vtab_init(db, db_name, table_name, idx, ppVtab, pzErr);
   if (rc != SQLITE_OK) {
-    diskann_close_index(pVtab->idx);
-    sqlite3_free(pVtab->db_name);
-    sqlite3_free(pVtab->table_name);
-    sqlite3_free(pVtab);
+    diskann_close_index(idx);
     return rc;
   }
 
-  *ppVtab = &pVtab->base;
   return SQLITE_OK;
 }
 
 /*
-** Disconnect from virtual table
+** xConnect — called when an existing vtab is reconnected (e.g., after reopen).
+** Opens the existing index — does NOT parse config (config from metadata).
+*/
+static int diskannConnect(sqlite3 *db, void *pAux, int argc,
+                          const char *const *argv, sqlite3_vtab **ppVtab,
+                          char **pzErr) {
+  DiskAnnIndex *idx = NULL;
+  int rc;
+
+  (void)pAux;
+  (void)argc;
+
+  if (argc < 3) {
+    *pzErr = sqlite3_mprintf("diskann: missing arguments");
+    return SQLITE_ERROR;
+  }
+
+  const char *db_name = argv[1];
+  const char *table_name = argv[2];
+
+  /* Open existing index — config comes from persisted metadata */
+  rc = diskann_open_index(db, db_name, table_name, &idx);
+  if (rc != DISKANN_OK) {
+    *pzErr = sqlite3_mprintf("diskann: index not found (rc=%d)", rc);
+    return SQLITE_ERROR;
+  }
+
+  rc = vtab_init(db, db_name, table_name, idx, ppVtab, pzErr);
+  if (rc != SQLITE_OK) {
+    diskann_close_index(idx);
+    return rc;
+  }
+
+  return SQLITE_OK;
+}
+
+/*
+** xDisconnect — close index handle, free vtab.
 */
 static int diskannDisconnect(sqlite3_vtab *pVtab) {
   diskann_vtab *p = (diskann_vtab *)pVtab;
-
-  if (p->idx) {
-    diskann_close_index(p->idx);
-  }
+  diskann_close_index(p->idx);
   sqlite3_free(p->db_name);
   sqlite3_free(p->table_name);
   sqlite3_free(p);
-
   return SQLITE_OK;
 }
 
 /*
-** Best index selection for query planning
-**
-** We support:
-** 1. Full table scan (not useful for ANN)
-** 2. Search by vector (ANN search)
+** xDestroy — drop shadow tables, close index, free vtab.
+** Called on DROP TABLE.
+*/
+static int diskannDestroy(sqlite3_vtab *pVtab) {
+  diskann_vtab *p = (diskann_vtab *)pVtab;
+
+  /* Close index first (releases blob handles before DROP) */
+  diskann_close_index(p->idx);
+  p->idx = NULL;
+
+  /* Drop shadow tables */
+  diskann_drop_index(p->db, p->db_name, p->table_name);
+
+  sqlite3_free(p->db_name);
+  sqlite3_free(p->table_name);
+  sqlite3_free(p);
+  return SQLITE_OK;
+}
+
+/*
+** xBestIndex — query planning.
+** Recognizes MATCH (vector search), EQ on k, LIMIT, and ROWID EQ.
 */
 static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
+  int idxNum = 0;
+
   (void)pVtab;
 
-  /* Check if vector column is constrained (for search) */
+  /* Pass 1: Find constraint positions.
+  ** SQLite presents constraints in arbitrary order, but xFilter reads argv
+  ** in a fixed order (MATCH, K, LIMIT, ROWID). We must assign argvIndex
+  ** values that match xFilter's consumption order, not constraint array
+  ** order. Record positions first, assign in pass 2. */
+  int i_match = -1, i_k = -1, i_limit = -1, i_rowid = -1;
+
   for (int i = 0; i < pInfo->nConstraint; i++) {
-    if (pInfo->aConstraint[i].iColumn == 1 && /* vector column */
-        pInfo->aConstraint[i].usable &&
-        pInfo->aConstraint[i].op == SQLITE_INDEX_CONSTRAINT_EQ) {
-      /* Vector equality constraint - use for ANN search */
-      pInfo->aConstraintUsage[i].argvIndex = 1;
-      pInfo->aConstraintUsage[i].omit = 1;
-      pInfo->idxNum = 1; /* ANN search */
-      pInfo->estimatedCost = 100.0;
-      pInfo->estimatedRows = 10;
-      return SQLITE_OK;
+    struct sqlite3_index_constraint *c = &pInfo->aConstraint[i];
+    if (!c->usable)
+      continue;
+
+    if (c->op == SQLITE_INDEX_CONSTRAINT_MATCH &&
+        c->iColumn == DISKANN_COL_VECTOR) {
+      i_match = i;
+      idxNum |= DISKANN_IDX_MATCH;
+    } else if (c->op == SQLITE_INDEX_CONSTRAINT_EQ &&
+               c->iColumn == DISKANN_COL_K) {
+      i_k = i;
+      idxNum |= DISKANN_IDX_K;
+    } else if (c->op == SQLITE_INDEX_CONSTRAINT_LIMIT) {
+      i_limit = i;
+      idxNum |= DISKANN_IDX_LIMIT;
+    } else if (c->op == SQLITE_INDEX_CONSTRAINT_EQ && c->iColumn == -1) {
+      i_rowid = i;
+      idxNum |= DISKANN_IDX_ROWID;
     }
   }
 
-  /* Full table scan - very expensive */
-  pInfo->estimatedCost = 1000000.0;
-  pInfo->estimatedRows = 100000;
-  pInfo->idxNum = 0;
+  /* Pass 2: Assign argvIndex in the order xFilter consumes them.
+  ** This ensures argv[0] = MATCH, argv[1] = K, argv[2] = LIMIT, etc.
+  ** regardless of the order SQLite presented constraints. */
+  int next_argv = 1;
+  if (i_match >= 0) {
+    pInfo->aConstraintUsage[i_match].argvIndex = next_argv++;
+    pInfo->aConstraintUsage[i_match].omit = 1;
+  }
+  if (i_k >= 0) {
+    pInfo->aConstraintUsage[i_k].argvIndex = next_argv++;
+    pInfo->aConstraintUsage[i_k].omit = 1;
+  }
+  if (i_limit >= 0) {
+    pInfo->aConstraintUsage[i_limit].argvIndex = next_argv++;
+    pInfo->aConstraintUsage[i_limit].omit = 1;
+  }
+  if (i_rowid >= 0) {
+    pInfo->aConstraintUsage[i_rowid].argvIndex = next_argv++;
+    pInfo->aConstraintUsage[i_rowid].omit = 1;
+  }
+
+  pInfo->idxNum = idxNum;
+
+  if (idxNum & DISKANN_IDX_MATCH) {
+    pInfo->estimatedCost = 100.0;
+    pInfo->estimatedRows = 10;
+  } else if (idxNum & DISKANN_IDX_ROWID) {
+    pInfo->estimatedCost = 1.0;
+    pInfo->estimatedRows = 1;
+    pInfo->idxFlags = SQLITE_INDEX_SCAN_UNIQUE;
+  } else {
+    pInfo->estimatedCost = 1e12;
+    pInfo->estimatedRows = 0;
+  }
 
   return SQLITE_OK;
 }
 
 /*
-** Open a cursor
+** xOpen — allocate a cursor.
 */
 static int diskannOpen(sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCursor) {
   diskann_cursor *pCur;
@@ -255,33 +384,26 @@ static int diskannOpen(sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCursor) {
 }
 
 /*
-** Close a cursor
+** xClose — free cursor and results.
 */
 static int diskannClose(sqlite3_vtab_cursor *pCursor) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
-
-  if (pCur->results) {
-    sqlite3_free(pCur->results);
-  }
+  sqlite3_free(pCur->results);
   sqlite3_free(pCur);
-
   return SQLITE_OK;
 }
 
 /*
-** Filter/search operation
-**
-** idxNum: 0=full scan, 1=ANN search
-** argc==1 && argv[0] = query vector BLOB
+** xFilter — execute search or ROWID lookup based on idxNum from xBestIndex.
 */
 static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
                          const char *idxStr, int argc, sqlite3_value **argv) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
   diskann_vtab *pVtab = (diskann_vtab *)pCursor->pVtab;
-  int k = 10; /* Default: return 10 neighbors */
-  int rc;
+  int next = 0;
 
   (void)idxStr;
+  (void)argc;
 
   /* Free previous results */
   if (pCur->results) {
@@ -291,43 +413,93 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
   pCur->num_results = 0;
   pCur->current = 0;
 
-  if (idxNum == 1 && argc == 1) {
-    /* ANN search */
-    const void *query_blob = sqlite3_value_blob(argv[0]);
-    int blob_bytes = sqlite3_value_bytes(argv[0]);
-    uint32_t query_dims = (uint32_t)((size_t)blob_bytes / sizeof(float));
+  if (idxNum & DISKANN_IDX_MATCH) {
+    /* ANN search path */
+    const float *query = (const float *)sqlite3_value_blob(argv[next]);
+    int bytes = sqlite3_value_bytes(argv[next]);
+    uint32_t query_dims = (uint32_t)((size_t)bytes / sizeof(float));
+    next++;
 
-    if (!query_blob || query_dims == 0) {
-      return SQLITE_ERROR;
+    int k = 10; /* default */
+    if (idxNum & DISKANN_IDX_K) {
+      k = sqlite3_value_int(argv[next]);
+      if (k <= 0)
+        k = 10;
+      next++;
+    }
+    if (idxNum & DISKANN_IDX_LIMIT) {
+      int limit = sqlite3_value_int(argv[next]);
+      if (limit > 0 && limit < k)
+        k = limit;
+      next++;
+    }
+    /* Skip ROWID arg if also present (unlikely with MATCH, but be safe) */
+    if (idxNum & DISKANN_IDX_ROWID) {
+      next++;
     }
 
-    /* Allocate result buffer */
-    pCur->results = sqlite3_malloc((int)((size_t)k * sizeof(DiskAnnResult)));
-    if (!pCur->results) {
+    if (!query || query_dims == 0) {
+      pCur->num_results = 0;
+      return SQLITE_OK;
+    }
+
+    pCur->results = sqlite3_malloc(k * (int)sizeof(DiskAnnResult));
+    if (!pCur->results)
       return SQLITE_NOMEM;
-    }
 
-    /* Perform search */
-    rc = diskann_search(pVtab->idx, (const float *)query_blob, query_dims, k,
-                        pCur->results);
+    int rc = diskann_search(pVtab->idx, query, query_dims, k, pCur->results);
     if (rc < 0) {
       sqlite3_free(pCur->results);
       pCur->results = NULL;
       return SQLITE_ERROR;
     }
-
-    pCur->num_results = rc;
+    pCur->num_results = rc; /* rc IS the count */
     pCur->current = 0;
-  } else {
-    /* Full table scan - not supported */
-    pCur->num_results = 0;
+    return SQLITE_OK;
   }
 
+  if (idxNum & DISKANN_IDX_ROWID) {
+    /* ROWID scan — single-row lookup for DELETE support */
+    sqlite_int64 target = sqlite3_value_int64(argv[next]);
+
+    /* Check if row exists in shadow table */
+    char *sql =
+        sqlite3_mprintf("SELECT 1 FROM \"%w\".\"%w_shadow\" WHERE id = ?",
+                        pVtab->db_name, pVtab->table_name);
+    if (!sql)
+      return SQLITE_NOMEM;
+
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(pVtab->db, sql, -1, &stmt, NULL);
+    sqlite3_free(sql);
+    if (rc != SQLITE_OK)
+      return rc;
+
+    sqlite3_bind_int64(stmt, 1, target);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+      pCur->results = sqlite3_malloc((int)sizeof(DiskAnnResult));
+      if (!pCur->results) {
+        sqlite3_finalize(stmt);
+        return SQLITE_NOMEM;
+      }
+      pCur->results[0].id = target;
+      pCur->results[0].distance = 0.0f;
+      pCur->num_results = 1;
+    } else {
+      pCur->num_results = 0;
+    }
+    sqlite3_finalize(stmt);
+    pCur->current = 0;
+    return SQLITE_OK;
+  }
+
+  /* No MATCH, no ROWID → empty result set */
+  pCur->num_results = 0;
   return SQLITE_OK;
 }
 
 /*
-** Advance cursor to next result
+** xNext — advance cursor to next result.
 */
 static int diskannNext(sqlite3_vtab_cursor *pCursor) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
@@ -336,7 +508,7 @@ static int diskannNext(sqlite3_vtab_cursor *pCursor) {
 }
 
 /*
-** Check if cursor is at end
+** xEof — check if cursor is at end.
 */
 static int diskannEof(sqlite3_vtab_cursor *pCursor) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
@@ -344,123 +516,137 @@ static int diskannEof(sqlite3_vtab_cursor *pCursor) {
 }
 
 /*
-** Return column value
-**
-** Column 0: rowid
-** Column 1: vector (NULL - not returned in search results)
+** xColumn — return column value.
+** Col 0 = vector (NULL, write-only in search context)
+** Col 1 = distance
+** Col 2 = k (NULL, input-only parameter)
 */
 static int diskannColumn(sqlite3_vtab_cursor *pCursor, sqlite3_context *ctx,
                          int i) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
 
-  if (pCur->current >= pCur->num_results) {
+  if (pCur->current >= pCur->num_results)
     return SQLITE_ERROR;
-  }
 
-  if (i == 0) {
-    /* rowid */
-    sqlite3_result_int64(ctx, pCur->results[pCur->current].id);
-  } else if (i == 1) {
-    /* vector - not available in search results */
+  switch (i) {
+  case DISKANN_COL_VECTOR:
     sqlite3_result_null(ctx);
-  } else {
-    return SQLITE_ERROR;
+    break;
+  case DISKANN_COL_DISTANCE:
+    sqlite3_result_double(ctx, (double)pCur->results[pCur->current].distance);
+    break;
+  case DISKANN_COL_K:
+    sqlite3_result_null(ctx);
+    break;
+  default:
+    sqlite3_result_null(ctx);
+    break;
   }
 
   return SQLITE_OK;
 }
 
 /*
-** Return rowid
+** xRowid — return current row's rowid.
 */
 static int diskannRowid(sqlite3_vtab_cursor *pCursor, sqlite_int64 *pRowid) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
 
-  if (pCur->current >= pCur->num_results) {
+  if (pCur->current >= pCur->num_results)
     return SQLITE_ERROR;
-  }
 
   *pRowid = pCur->results[pCur->current].id;
   return SQLITE_OK;
 }
 
 /*
-** INSERT/UPDATE/DELETE handler
+** xUpdate — INSERT, DELETE handler.
 **
-** INSERT: argc==3, argv[0]=NULL, argv[1]=rowid (or NULL for auto),
-** argv[2]=vector UPDATE: argc==3, argv[0]=old_rowid, argv[1]=new_rowid,
-** argv[2]=vector DELETE: argc==2, argv[0]=rowid, argv[1]=NULL
+** INSERT: argv[0]=NULL, argv[1]=rowid, argv[2]=vector, argv[3]=distance(NULL),
+**         argv[4]=k(NULL). argc = 2 + nColumns = 5.
+** DELETE: argv[0]=rowid. argc = 1.
 */
 static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
                          sqlite_int64 *pRowid) {
   diskann_vtab *p = (diskann_vtab *)pVtab;
-  int rc;
 
   if (argc == 1) {
-    /* DELETE: argv[0] = rowid */
+    /* DELETE */
     sqlite_int64 rowid = sqlite3_value_int64(argv[0]);
-    rc = diskann_delete(p->idx, rowid);
-    return (rc == DISKANN_OK) ? SQLITE_OK : SQLITE_ERROR;
-  } else if (argc > 1 && sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    /* INSERT: argv[0]=NULL, argv[1]=rowid or NULL, argv[2+]=data */
-    sqlite_int64 rowid;
-    const void *vector_blob;
-    int blob_bytes;
-    uint32_t dims;
+    int rc = diskann_delete(p->idx, rowid);
+    /* NOTFOUND is not an error for DELETE — row may already be gone */
+    if (rc == DISKANN_OK || rc == DISKANN_ERROR_NOTFOUND)
+      return SQLITE_OK;
+    pVtab->zErrMsg = sqlite3_mprintf("diskann: delete failed (rc=%d)", rc);
+    return SQLITE_ERROR;
+  }
 
-    /* Get rowid */
+  if (argc > 1 && sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+    /* INSERT */
     if (sqlite3_value_type(argv[1]) == SQLITE_NULL) {
-      /* Auto-generate rowid - not supported yet */
+      pVtab->zErrMsg = sqlite3_mprintf("diskann: rowid required for INSERT");
+      return SQLITE_ERROR;
+    }
+    sqlite_int64 rowid = sqlite3_value_int64(argv[1]);
+
+    /* argv[2] = col 0 = vector (BLOB) */
+    if (sqlite3_value_type(argv[2]) != SQLITE_BLOB) {
+      pVtab->zErrMsg = sqlite3_mprintf("diskann: vector must be a BLOB");
+      return SQLITE_ERROR;
+    }
+
+    const float *vec = (const float *)sqlite3_value_blob(argv[2]);
+    int bytes = sqlite3_value_bytes(argv[2]);
+    uint32_t dims = (uint32_t)((size_t)bytes / sizeof(float));
+
+    if (dims != p->dimensions) {
       pVtab->zErrMsg =
-          sqlite3_mprintf("diskann: auto-generated rowid not supported");
-      return SQLITE_ERROR;
-    }
-    rowid = sqlite3_value_int64(argv[1]);
-
-    /* Get vector */
-    vector_blob = sqlite3_value_blob(argv[2]);
-    blob_bytes = sqlite3_value_bytes(argv[2]);
-    dims = (uint32_t)((size_t)blob_bytes / sizeof(float));
-
-    if (!vector_blob || dims == 0) {
-      pVtab->zErrMsg = sqlite3_mprintf("diskann: invalid vector");
+          sqlite3_mprintf("diskann: dimension mismatch (got %u, expected %u)",
+                          dims, p->dimensions);
       return SQLITE_ERROR;
     }
 
-    /* Insert */
-    rc = diskann_insert(p->idx, rowid, (const float *)vector_blob, dims);
+    /* argv[3]=distance(NULL), argv[4]=k(NULL) — skip */
+    int rc = diskann_insert(p->idx, rowid, vec, dims);
     if (rc == DISKANN_OK) {
       *pRowid = rowid;
       return SQLITE_OK;
-    } else {
-      pVtab->zErrMsg = sqlite3_mprintf("diskann: insert failed");
-      return SQLITE_ERROR;
     }
-  } else {
-    /* UPDATE - not supported */
-    pVtab->zErrMsg = sqlite3_mprintf("diskann: UPDATE not supported");
+    pVtab->zErrMsg = sqlite3_mprintf("diskann: insert failed (rc=%d)", rc);
     return SQLITE_ERROR;
   }
+
+  /* UPDATE — not supported */
+  pVtab->zErrMsg = sqlite3_mprintf("diskann: UPDATE not supported");
+  return SQLITE_ERROR;
 }
 
 /*
-** Virtual table module definition
+** xShadowName — protect shadow tables from direct manipulation.
+*/
+static int diskannShadowName(const char *zName) {
+  return sqlite3_stricmp(zName, "shadow") == 0 ||
+         sqlite3_stricmp(zName, "metadata") == 0;
+}
+
+/*
+** Virtual table module definition (iVersion=3 for xShadowName)
 */
 static sqlite3_module diskannModule = {
-    0,                 /* iVersion */
-    diskannConnect,    /* xCreate - same as xConnect for persistent tables */
-    diskannConnect,    /* xConnect */
+    3,                 /* iVersion — enables xShadowName */
+    diskannCreate,     /* xCreate — creates shadow tables + opens index */
+    diskannConnect,    /* xConnect — opens existing index only */
     diskannBestIndex,  /* xBestIndex */
-    diskannDisconnect, /* xDisconnect */
-    diskannDisconnect, /* xDestroy - same as xDisconnect */
-    diskannOpen,       /* xOpen - open a cursor */
-    diskannClose,      /* xClose - close a cursor */
-    diskannFilter,     /* xFilter - configure a cursor */
-    diskannNext,       /* xNext - advance a cursor */
-    diskannEof,        /* xEof - check for end of scan */
-    diskannColumn,     /* xColumn - read data */
-    diskannRowid,      /* xRowid - read data */
-    diskannUpdate,     /* xUpdate - write data */
+    diskannDisconnect, /* xDisconnect — closes index handle */
+    diskannDestroy,    /* xDestroy — drops shadow tables + frees */
+    diskannOpen,       /* xOpen */
+    diskannClose,      /* xClose */
+    diskannFilter,     /* xFilter */
+    diskannNext,       /* xNext */
+    diskannEof,        /* xEof */
+    diskannColumn,     /* xColumn */
+    diskannRowid,      /* xRowid */
+    diskannUpdate,     /* xUpdate */
     NULL,              /* xBegin */
     NULL,              /* xSync */
     NULL,              /* xCommit */
@@ -470,18 +656,19 @@ static sqlite3_module diskannModule = {
     NULL,              /* xSavepoint */
     NULL,              /* xRelease */
     NULL,              /* xRollbackTo */
-    NULL,              /* xShadowName */
+    diskannShadowName, /* xShadowName */
     NULL,              /* xIntegrity */
 };
 
 /*
-** Register the diskann virtual table module
+** Register the diskann virtual table module.
+** Called as extension entry point or directly from test code.
 */
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-int sqlite3_diskann_init(sqlite3 *db, char **pzErrMsg,
-                         const sqlite3_api_routines *pApi) {
+    int sqlite3_diskann_init(sqlite3 *db, char **pzErrMsg,
+                             const sqlite3_api_routines *pApi) {
   int rc;
 
 #ifdef DISKANN_EXTENSION
@@ -500,6 +687,5 @@ int sqlite3_diskann_init(sqlite3 *db, char **pzErrMsg,
     return rc;
   }
 
-  /* Success */
   return SQLITE_OK;
 }

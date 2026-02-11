@@ -169,6 +169,27 @@ extern void test_integration_clear_reinsert(void);
 extern void test_integration_recall_128d(void);
 extern void test_integration_delete_at_scale(void);
 
+/* Virtual table tests */
+extern void test_vtab_create(void);
+extern void test_vtab_create_no_dimension(void);
+extern void test_vtab_create_bad_metric(void);
+extern void test_vtab_drop(void);
+extern void test_vtab_create_sql_injection(void);
+extern void test_vtab_insert_blob(void);
+extern void test_vtab_insert_no_rowid(void);
+extern void test_vtab_insert_wrong_dims(void);
+extern void test_vtab_insert_null_vector(void);
+extern void test_vtab_search_basic(void);
+extern void test_vtab_search_k(void);
+extern void test_vtab_search_limit(void);
+extern void test_vtab_search_sorted(void);
+extern void test_vtab_search_exact_match(void);
+extern void test_vtab_search_empty(void);
+extern void test_vtab_search_no_match(void);
+extern void test_vtab_delete(void);
+extern void test_vtab_delete_nonexistent(void);
+extern void test_vtab_reopen(void);
+
 void setUp(void) { /* Global setup if needed */ }
 
 void tearDown(void) { /* Global teardown if needed */ }
@@ -347,6 +368,27 @@ int main(void) {
   RUN_TEST(test_integration_clear_reinsert);
   RUN_TEST(test_integration_recall_128d);
   RUN_TEST(test_integration_delete_at_scale);
+
+  /* Virtual table tests */
+  RUN_TEST(test_vtab_create);
+  RUN_TEST(test_vtab_create_no_dimension);
+  RUN_TEST(test_vtab_create_bad_metric);
+  RUN_TEST(test_vtab_drop);
+  RUN_TEST(test_vtab_create_sql_injection);
+  RUN_TEST(test_vtab_insert_blob);
+  RUN_TEST(test_vtab_insert_no_rowid);
+  RUN_TEST(test_vtab_insert_wrong_dims);
+  RUN_TEST(test_vtab_insert_null_vector);
+  RUN_TEST(test_vtab_search_basic);
+  RUN_TEST(test_vtab_search_k);
+  RUN_TEST(test_vtab_search_limit);
+  RUN_TEST(test_vtab_search_sorted);
+  RUN_TEST(test_vtab_search_exact_match);
+  RUN_TEST(test_vtab_search_empty);
+  RUN_TEST(test_vtab_search_no_match);
+  RUN_TEST(test_vtab_delete);
+  RUN_TEST(test_vtab_delete_nonexistent);
+  RUN_TEST(test_vtab_reopen);
 
   return UNITY_END();
 }

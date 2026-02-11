@@ -9,7 +9,7 @@ Implement a SQLite virtual table for DiskANN with metadata columns and filtered 
 - [x] Research & Planning
 - [x] Test Design
 - [x] Implementation Design
-- [ ] Test-First Development
+- [x] Test-First Development (Phase 1 COMPLETE ✅, Phase 2+ remaining)
 - [ ] Implementation
 - [ ] Integration
 - [ ] Cleanup & Documentation
@@ -48,8 +48,8 @@ Build phases execute sequentially. Each has its own 8-phase lifecycle:
 
 | Phase     | TPP                                       | Tests     | Description                                    |
 | --------- | ----------------------------------------- | --------- | ---------------------------------------------- |
-| 0         | `20260210-vtab-phase0-entry-points.md`    | 0 (infra) | Consolidate entry points, extract shared utils |
-| 1         | `20260210-vtab-phase1-basic-vtab.md`      | 19        | CREATE/INSERT/SEARCH/DELETE via SQL            |
+| 0 DONE    | `20260210-vtab-phase0-entry-points.md`    | 0 (infra) | Consolidate entry points, extract shared utils |
+| 1 DONE    | `20260210-vtab-phase1-basic-vtab.md`      | 19        | CREATE/INSERT/SEARCH/DELETE via SQL            |
 | 2         | `20260210-vtab-phase2-metadata.md`        | 13        | Metadata columns, schema persistence           |
 | 3         | `20260210-vtab-phase3-filtered-search.md` | 16        | Filter during beam search, C API + SQL         |
 | **Total** |                                           | **48**    |                                                |
@@ -65,7 +65,7 @@ Phase 4 (Polish — TS bindings, JSON vectors, README) is tracked inline below.
 - **HIDDEN columns and SELECT \*.** HIDDEN cols don't appear in `SELECT *` but can be referenced by name. Metadata cols (NOT hidden) appear in `SELECT *`.
 - **Filtered-DiskANN paper + Microsoft Rust:** Non-matching nodes MUST still be visited (graph bridges). Filter only gates top-K insertion. `search_ctx_mark_visited()` sets `visited=1` and adds to visited list BEFORE the filter check.
 - **Beam width heuristic:** `max(search_list * 2, k * 4)` for filtered search. Tune from recall test results.
-- **xBestIndex argv assignment must be conditional.** Assign argvIndex sequentially for each present constraint (MATCH, K, LIMIT, filters). xFilter unpacks based on idxNum bitmask, not fixed positions.
+- **xBestIndex argv assignment must match xFilter consumption order.** SQLite presents constraints in arbitrary order. Use a two-pass approach: pass 1 records constraint positions, pass 2 assigns argvIndex in the fixed order xFilter expects (MATCH, K, LIMIT, ROWID, then filters). Assigning sequentially as encountered causes argv order mismatches that silently break xFilter.
 
 ## Solutions
 
