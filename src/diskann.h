@@ -46,6 +46,7 @@ extern "C" {
 #define DISKANN_ERROR_DIMENSION (-5)
 #define DISKANN_ERROR_IO (-6)
 #define DISKANN_ERROR_EXISTS (-7)
+#define DISKANN_ERROR_VERSION (-8) /* Index format version mismatch */
 
 /*
 ** Distance metrics

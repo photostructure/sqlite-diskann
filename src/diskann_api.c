@@ -23,12 +23,65 @@
 #define DEFAULT_MAX_NEIGHBORS 32
 #define DEFAULT_SEARCH_LIST_SIZE 100
 #define DEFAULT_INSERT_LIST_SIZE 200
-#define DEFAULT_BLOCK_SIZE 4096
-#define DEFAULT_PRUNING_ALPHA 1.2
-
+/* Format version for indices created by this code */
+#define CURRENT_FORMAT_VERSION 2
+/* 1.4 leads to less aggressive pruning for better connectivity at scale */
+#define DEFAULT_PRUNING_ALPHA 1.4
 /* Maximum allowed values */
 #define MAX_DIMENSIONS 16384
 #define MAX_BLOCK_SIZE 134217728 /* 128MB */
+
+/*
+** Calculate minimum block size needed for a given configuration.
+** Adds 10% safety margin to account for temporary edge additions during
+** insert/prune cycles.
+**
+** Formula:
+**   node_overhead = NODE_METADATA_SIZE + (dimensions × sizeof(float))
+**   edge_overhead = (dimensions × sizeof(float)) + EDGE_METADATA_SIZE
+**   margin_neighbors = max_neighbors + (max_neighbors / 10)
+**   min_size = node_overhead + (margin_neighbors × edge_overhead)
+**   aligned = round up to 4KB boundary
+**
+** Returns 0 on error (overflow or invalid inputs).
+*/
+static uint32_t calculate_block_size(uint32_t dimensions,
+                                     uint32_t max_neighbors) {
+  if (dimensions == 0 || max_neighbors == 0) {
+    return 0;
+  }
+
+  /* Node overhead: metadata + vector */
+  uint64_t node_vector_size = (uint64_t)dimensions * sizeof(float);
+  uint64_t node_overhead = NODE_METADATA_SIZE + node_vector_size;
+
+  /* Edge overhead: vector + metadata */
+  uint64_t edge_vector_size = (uint64_t)dimensions * sizeof(float);
+  uint64_t edge_overhead = edge_vector_size + EDGE_METADATA_SIZE;
+
+  /* Add 10% margin for safety (allow temporary over-subscription during
+   * pruning) */
+  uint64_t margin_neighbors =
+      (uint64_t)max_neighbors + ((uint64_t)max_neighbors / 10);
+
+  /* Calculate minimum size */
+  uint64_t min_size = node_overhead + (margin_neighbors * edge_overhead);
+
+  /* Check for overflow or exceeding max block size */
+  if (min_size > MAX_BLOCK_SIZE) {
+    return 0;
+  }
+
+  /* Round up to next 4KB boundary for alignment */
+  uint64_t aligned = ((min_size + 4095) / 4096) * 4096;
+
+  /* Final overflow check */
+  if (aligned > UINT32_MAX || aligned > MAX_BLOCK_SIZE) {
+    return 0;
+  }
+
+  return (uint32_t)aligned;
+}
 
 /*
 ** Store a single metadata key-value pair as a SQLite INTEGER.
@@ -103,7 +156,7 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
                                   .max_neighbors = DEFAULT_MAX_NEIGHBORS,
                                   .search_list_size = DEFAULT_SEARCH_LIST_SIZE,
                                   .insert_list_size = DEFAULT_INSERT_LIST_SIZE,
-                                  .block_size = DEFAULT_BLOCK_SIZE};
+                                  .block_size = 0}; /* 0 = auto-calculate */
 
   if (!config) {
     config = &default_config;
@@ -114,9 +167,39 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
     return DISKANN_ERROR_DIMENSION;
   }
 
-  if (config->block_size == 0 || config->block_size > MAX_BLOCK_SIZE) {
+  /* Auto-calculate or validate block_size */
+  uint32_t block_size = config->block_size;
+  uint32_t min_required =
+      calculate_block_size(config->dimensions, config->max_neighbors);
+
+  if (min_required == 0) {
+    /* Calculation failed (overflow or invalid inputs) */
     return DISKANN_ERROR_INVALID;
   }
+
+  if (block_size == 0) {
+    /* Auto-calculate: use the minimum required size */
+    block_size = min_required;
+  } else {
+    /* User-provided: validate it's large enough */
+    if (block_size < min_required) {
+      /* Error: provided block_size too small for this configuration
+       * User needs to either:
+       * - Omit block_size (auto-calculate)
+       * - Increase block_size to >= min_required
+       * - Reduce dimensions or max_neighbors
+       */
+      return DISKANN_ERROR_INVALID;
+    }
+    /* Also check max limit */
+    if (block_size > MAX_BLOCK_SIZE) {
+      return DISKANN_ERROR_INVALID;
+    }
+  }
+
+  /* Create a mutable config with calculated block_size */
+  DiskAnnConfig actual_config = *config;
+  actual_config.block_size = block_size;
 
   /* Fail if index already exists (don't silently overwrite config) */
   rc = shadow_table_exists(db, db_name, index_name);
@@ -174,29 +257,35 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
     return DISKANN_ERROR;
   }
 
+  /* Store format version (for future migration/compatibility) */
+  rc = store_metadata_int(db, db_name, index_name, "format_version",
+                          (int64_t)CURRENT_FORMAT_VERSION);
+  if (rc != DISKANN_OK)
+    return rc;
+
   /* Store index configuration as portable integers */
   rc = store_metadata_int(db, db_name, index_name, "dimensions",
-                          (int64_t)config->dimensions);
+                          (int64_t)actual_config.dimensions);
   if (rc != DISKANN_OK)
     return rc;
   rc = store_metadata_int(db, db_name, index_name, "metric",
-                          (int64_t)config->metric);
+                          (int64_t)actual_config.metric);
   if (rc != DISKANN_OK)
     return rc;
   rc = store_metadata_int(db, db_name, index_name, "max_neighbors",
-                          (int64_t)config->max_neighbors);
+                          (int64_t)actual_config.max_neighbors);
   if (rc != DISKANN_OK)
     return rc;
   rc = store_metadata_int(db, db_name, index_name, "search_list_size",
-                          (int64_t)config->search_list_size);
+                          (int64_t)actual_config.search_list_size);
   if (rc != DISKANN_OK)
     return rc;
   rc = store_metadata_int(db, db_name, index_name, "insert_list_size",
-                          (int64_t)config->insert_list_size);
+                          (int64_t)actual_config.insert_list_size);
   if (rc != DISKANN_OK)
     return rc;
   rc = store_metadata_int(db, db_name, index_name, "block_size",
-                          (int64_t)config->block_size);
+                          (int64_t)actual_config.block_size);
   if (rc != DISKANN_OK)
     return rc;
   /* Store pruning_alpha as fixed-point integer (×1000) for portability */
@@ -296,6 +385,8 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
   }
 
   /* Read all metadata entries (stored as portable integers) */
+  int64_t format_version = 0; /* 0 = not found (old index) */
+
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     const char *key = (const char *)sqlite3_column_text(stmt, 0);
     if (!key)
@@ -303,7 +394,9 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
 
     int64_t value = sqlite3_column_int64(stmt, 1);
 
-    if (strcmp(key, "dimensions") == 0) {
+    if (strcmp(key, "format_version") == 0) {
+      format_version = value;
+    } else if (strcmp(key, "dimensions") == 0) {
       idx->dimensions = (uint32_t)value;
     } else if (strcmp(key, "metric") == 0) {
       idx->metric = (uint8_t)value;
@@ -322,6 +415,19 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
 
   sqlite3_finalize(stmt);
   stmt = NULL;
+
+  /* Check format version compatibility
+   * TEMPORARY: During development, allow opening old indices (format_version 0 or 1)
+   * TODO: Remove this workaround after migration - require version 2
+   */
+  if (format_version > CURRENT_FORMAT_VERSION) {
+    /* Index created by newer version of library - cannot be opened
+     * User must upgrade library
+     */
+    rc = DISKANN_ERROR_VERSION;
+    goto cleanup;
+  }
+  /* Note: format_version == 0 or 1 allowed for now (backward compat during dev) */
 
   /* Validate required metadata was loaded and within bounds */
   if (idx->dimensions == 0 || idx->dimensions > MAX_DIMENSIONS) {
