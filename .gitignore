@@ -49,3 +49,11 @@ temp/
 *.db
 *.db-shm
 *.db-wal
+
+# From clangd
+compile_commands.events.json
+# From bear
+compile_commands.json
+
+# Local settings
+.claude/settings.local.json
