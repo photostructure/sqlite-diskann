@@ -40,9 +40,10 @@ if (-not (Test-Path $BuildDir)) {
 # /std:c17   - C17 standard
 # /W4        - High warning level (MSVC equivalent of -Wall -Wextra)
 # /WX        - Treat warnings as errors
+# /wd4702    - Disable "unreachable code" warning (Unity TEST_FAIL uses longjmp)
 # /O2        - Optimize for speed
 # /nologo    - Suppress banner
-$CommonFlags = @("/std:c17", "/W4", "/WX", "/O2", "/nologo", "/I$VendorSqlite")
+$CommonFlags = @("/std:c17", "/W4", "/WX", "/wd4702", "/O2", "/nologo", "/I$VendorSqlite")
 
 # Build vendored SQLite (relaxed warnings - SQLite triggers MSVC warnings)
 Write-Host "Building vendored SQLite 3.51.2..."
