@@ -163,8 +163,7 @@ for (const factory of dbFactories) {
         }
       });
 
-      it.skip("creates virtual table successfully (once extension loaded)", () => {
-        // Skip until extension is implemented
+      it("creates virtual table successfully", () => {
         loadDiskAnnExtension(db);
         createDiskAnnIndex(db, "embeddings", {
           dimension: 512,
@@ -209,7 +208,7 @@ for (const factory of dbFactories) {
         }).toThrow(/non-empty array/);
       });
 
-      it.skip("inserts vector successfully (once extension loaded)", () => {
+      it("inserts vector successfully", () => {
         loadDiskAnnExtension(db);
         createDiskAnnIndex(db, "embeddings", {
           dimension: 3,
@@ -217,7 +216,7 @@ for (const factory of dbFactories) {
         });
 
         expect(() => {
-          insertVector(db, "embeddings", 1, [1.0, 2.0, 3.0]);
+          insertVector(db, "embeddings", 1, new Float32Array([1.0, 2.0, 3.0]));
         }).not.toThrow();
       });
     });
@@ -258,18 +257,23 @@ for (const factory of dbFactories) {
         }).toThrow(/Invalid k/);
       });
 
-      it.skip("returns empty array for empty index (once extension loaded)", () => {
+      it("returns empty array for empty index", () => {
         loadDiskAnnExtension(db);
         createDiskAnnIndex(db, "embeddings", {
           dimension: 3,
           metric: "euclidean",
         });
 
-        const results = searchNearest(db, "embeddings", [1.0, 2.0, 3.0], 10);
+        const results = searchNearest(
+          db,
+          "embeddings",
+          new Float32Array([1.0, 2.0, 3.0]),
+          10
+        );
         expect(results).toEqual([]);
       });
 
-      it.skip("returns correct neighbors (once extension loaded)", () => {
+      it("returns correct neighbors", () => {
         loadDiskAnnExtension(db);
         createDiskAnnIndex(db, "embeddings", {
           dimension: 3,
@@ -277,15 +281,20 @@ for (const factory of dbFactories) {
         });
 
         // Insert test vectors
-        insertVector(db, "embeddings", 1, [1.0, 0.0, 0.0]);
-        insertVector(db, "embeddings", 2, [0.0, 1.0, 0.0]);
-        insertVector(db, "embeddings", 3, [0.0, 0.0, 1.0]);
+        insertVector(db, "embeddings", 1, new Float32Array([1.0, 0.0, 0.0]));
+        insertVector(db, "embeddings", 2, new Float32Array([0.0, 1.0, 0.0]));
+        insertVector(db, "embeddings", 3, new Float32Array([0.0, 0.0, 1.0]));
 
         // Search for nearest to [1, 0, 0]
-        const results = searchNearest(db, "embeddings", [1.0, 0.0, 0.0], 2);
+        const results = searchNearest(
+          db,
+          "embeddings",
+          new Float32Array([1.0, 0.0, 0.0]),
+          2
+        );
 
         expect(results).toHaveLength(2);
-        expect(results[0].id).toBe(1); // Exact match
+        expect(results[0].rowid).toBe(1); // Exact match
         expect(results[0].distance).toBeCloseTo(0.0, 3);
       });
     });
@@ -301,19 +310,161 @@ for (const factory of dbFactories) {
         factory.cleanup?.(db);
       });
 
-      it.skip("deletes vector successfully (once extension loaded)", () => {
+      it("deletes vector successfully", () => {
         loadDiskAnnExtension(db);
         createDiskAnnIndex(db, "embeddings", {
           dimension: 3,
           metric: "euclidean",
         });
 
-        insertVector(db, "embeddings", 1, [1.0, 0.0, 0.0]);
+        insertVector(db, "embeddings", 1, new Float32Array([1.0, 0.0, 0.0]));
         expect(() => deleteVector(db, "embeddings", 1)).not.toThrow();
 
         // Verify deletion
-        const results = searchNearest(db, "embeddings", [1.0, 0.0, 0.0], 10);
+        const results = searchNearest(
+          db,
+          "embeddings",
+          new Float32Array([1.0, 0.0, 0.0]),
+          10
+        );
         expect(results).toHaveLength(0);
+      });
+    });
+
+    describe("Metadata columns", () => {
+      let db: DatabaseLike;
+
+      beforeEach(() => {
+        db = factory.create(":memory:");
+      });
+
+      afterEach(() => {
+        factory.cleanup?.(db);
+      });
+
+      it("creates index with metadata columns", () => {
+        loadDiskAnnExtension(db);
+        expect(() => {
+          createDiskAnnIndex(db, "photos", {
+            dimension: 3,
+            metric: "euclidean",
+            metadataColumns: [
+              { name: "category", type: "TEXT" },
+              { name: "year", type: "INTEGER" },
+            ],
+          });
+        }).not.toThrow();
+      });
+
+      it("rejects reserved column names", () => {
+        loadDiskAnnExtension(db);
+        expect(() => {
+          createDiskAnnIndex(db, "photos", {
+            dimension: 3,
+            metric: "euclidean",
+            metadataColumns: [{ name: "vector", type: "TEXT" }],
+          });
+        }).toThrow(/reserved column name/i);
+
+        expect(() => {
+          createDiskAnnIndex(db, "photos2", {
+            dimension: 3,
+            metric: "euclidean",
+            metadataColumns: [{ name: "distance", type: "TEXT" }],
+          });
+        }).toThrow(/reserved column name/i);
+      });
+
+      it("rejects duplicate column names", () => {
+        loadDiskAnnExtension(db);
+        expect(() => {
+          createDiskAnnIndex(db, "photos", {
+            dimension: 3,
+            metric: "euclidean",
+            metadataColumns: [
+              { name: "category", type: "TEXT" },
+              { name: "category", type: "INTEGER" },
+            ],
+          });
+        }).toThrow(/duplicate.*column/i);
+      });
+
+      it("inserts and searches with metadata", () => {
+        loadDiskAnnExtension(db);
+        createDiskAnnIndex(db, "photos", {
+          dimension: 3,
+          metric: "euclidean",
+          metadataColumns: [
+            { name: "category", type: "TEXT" },
+            { name: "year", type: "INTEGER" },
+          ],
+        });
+
+        // Insert with metadata using raw SQL
+        const vec1 = new Float32Array([1.0, 0.0, 0.0]);
+        const vec2 = new Float32Array([0.0, 1.0, 0.0]);
+
+        db.prepare(
+          "INSERT INTO photos(rowid, vector, category, year) VALUES (?, ?, ?, ?)"
+        ).run(1, vec1, "landscape", 2024);
+        db.prepare(
+          "INSERT INTO photos(rowid, vector, category, year) VALUES (?, ?, ?, ?)"
+        ).run(2, vec2, "portrait", 2023);
+
+        // Search and verify metadata is returned
+        const results = db
+          .prepare(
+            "SELECT rowid, distance, category, year FROM photos WHERE vector MATCH ? AND k = ?"
+          )
+          .all(vec1, 2) as Array<{
+          rowid: number;
+          distance: number;
+          category: string;
+          year: number;
+        }>;
+
+        expect(results).toHaveLength(2);
+        expect(results[0].rowid).toBe(1);
+        expect(results[0].category).toBe("landscape");
+        expect(results[0].year).toBe(2024);
+      });
+
+      it("filters search by metadata", () => {
+        loadDiskAnnExtension(db);
+        createDiskAnnIndex(db, "photos", {
+          dimension: 3,
+          metric: "euclidean",
+          metadataColumns: [{ name: "category", type: "TEXT" }],
+        });
+
+        // Insert test data
+        const vec = new Float32Array([1.0, 0.0, 0.0]);
+        db.prepare("INSERT INTO photos(rowid, vector, category) VALUES (?, ?, ?)").run(
+          1,
+          vec,
+          "landscape"
+        );
+        db.prepare("INSERT INTO photos(rowid, vector, category) VALUES (?, ?, ?)").run(
+          2,
+          vec,
+          "portrait"
+        );
+        db.prepare("INSERT INTO photos(rowid, vector, category) VALUES (?, ?, ?)").run(
+          3,
+          vec,
+          "landscape"
+        );
+
+        // Search with filter
+        const results = db
+          .prepare(
+            `SELECT rowid, category FROM photos
+             WHERE vector MATCH ? AND k = 10 AND category = 'landscape'`
+          )
+          .all(vec) as Array<{ rowid: number; category: string }>;
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.category === "landscape")).toBe(true);
       });
     });
   });

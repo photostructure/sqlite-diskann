@@ -84,6 +84,26 @@ export interface DatabaseLike {
 export type DistanceMetric = "cosine" | "euclidean" | "dot";
 
 /**
+ * Metadata column types supported by virtual table
+ */
+export type MetadataColumnType = "TEXT" | "INTEGER" | "REAL" | "BLOB";
+
+/**
+ * Metadata column definition for virtual table
+ */
+export interface MetadataColumn {
+  /**
+   * Column name (must be valid SQL identifier: alphanumeric/underscore, starts with letter/underscore)
+   */
+  name: string;
+
+  /**
+   * SQLite column type
+   */
+  type: MetadataColumnType;
+}
+
+/**
  * Configuration options for creating a DiskANN index
  */
 export interface DiskAnnIndexOptions {
@@ -117,6 +137,23 @@ export interface DiskAnnIndexOptions {
    * Set to true for cosine similarity with non-normalized inputs
    */
   normalizeVectors?: boolean;
+
+  /**
+   * Optional metadata columns to store alongside vectors
+   * Enables filtered search: WHERE vector MATCH ? AND k = 10 AND category = 'landscape'
+   *
+   * @example
+   * ```typescript
+   * {
+   *   metadataColumns: [
+   *     { name: 'category', type: 'TEXT' },
+   *     { name: 'year', type: 'INTEGER' },
+   *     { name: 'score', type: 'REAL' }
+   *   ]
+   * }
+   * ```
+   */
+  metadataColumns?: MetadataColumn[];
 }
 
 /**
@@ -124,9 +161,9 @@ export interface DiskAnnIndexOptions {
  */
 export interface NearestNeighborResult {
   /**
-   * Row ID from the index
+   * Row ID from the index (SQLite rowid)
    */
-  id: number;
+  rowid: number;
 
   /**
    * Distance to query vector (lower is closer for cosine/euclidean)
@@ -136,6 +173,12 @@ export interface NearestNeighborResult {
    * - dot: higher = more similar (NOT a distance)
    */
   distance: number;
+
+  /**
+   * Metadata columns (if defined in index)
+   * Property names match column names from CREATE VIRTUAL TABLE
+   */
+  [key: string]: unknown;
 }
 
 /**

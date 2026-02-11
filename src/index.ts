@@ -47,6 +47,8 @@ export type {
   DatabaseLike,
   DiskAnnIndexOptions,
   DistanceMetric,
+  MetadataColumn,
+  MetadataColumnType,
   NearestNeighborResult,
   // SearchOptions currently unused but exported for future API enhancements
   SearchOptions,
@@ -134,10 +136,21 @@ export function loadDiskAnnExtension(db: DatabaseLike): void {
  *
  * @example
  * ```ts
+ * // Basic index
  * createDiskAnnIndex(db, "clip_embeddings", {
  *   dimension: 512,
  *   metric: "cosine",
  *   maxDegree: 64
+ * });
+ *
+ * // With metadata columns for filtered search
+ * createDiskAnnIndex(db, "photos", {
+ *   dimension: 512,
+ *   metric: "cosine",
+ *   metadataColumns: [
+ *     { name: 'category', type: 'TEXT' },
+ *     { name: 'year', type: 'INTEGER' }
+ *   ]
  * });
  * ```
  */
@@ -152,6 +165,7 @@ export function createDiskAnnIndex(
     maxDegree = 64,
     buildSearchListSize = 100,
     normalizeVectors = false,
+    metadataColumns = [],
   } = options;
 
   // Validate table name to prevent SQL injection
@@ -172,17 +186,48 @@ export function createDiskAnnIndex(
     throw new Error(`Invalid maxDegree: ${maxDegree} (must be positive integer)`);
   }
 
+  // Validate metadata columns
+  const reservedNames = ["vector", "distance", "k", "rowid"];
+  const seenNames = new Set<string>();
+  for (const col of metadataColumns) {
+    if (!isValidIdentifier(col.name)) {
+      throw new Error(
+        `Invalid metadata column name: ${col.name} (must be alphanumeric/underscore, start with letter/underscore, max ${MAX_IDENTIFIER_LEN} chars)`
+      );
+    }
+    if (reservedNames.includes(col.name.toLowerCase())) {
+      throw new Error(
+        `Reserved column name: ${col.name} (cannot use vector, distance, k, or rowid)`
+      );
+    }
+    if (seenNames.has(col.name.toLowerCase())) {
+      throw new Error(`Duplicate metadata column name: ${col.name}`);
+    }
+    seenNames.add(col.name.toLowerCase());
+
+    if (!["TEXT", "INTEGER", "REAL", "BLOB"].includes(col.type)) {
+      throw new Error(
+        `Invalid column type for ${col.name}: ${col.type} (must be TEXT, INTEGER, REAL, or BLOB)`
+      );
+    }
+  }
+
   // Build CREATE VIRTUAL TABLE statement
   // tableName is validated above, safe to interpolate
-  const sql = `
-    CREATE VIRTUAL TABLE ${tableName} USING diskann(
-      dimension=${dimension},
-      metric=${metric},
-      max_degree=${maxDegree},
-      build_search_list_size=${buildSearchListSize},
-      normalize_vectors=${normalizeVectors ? 1 : 0}
-    )
-  `.trim();
+  const params = [
+    `dimension=${dimension}`,
+    `metric=${metric}`,
+    `max_degree=${maxDegree}`,
+    `build_search_list_size=${buildSearchListSize}`,
+    `normalize_vectors=${normalizeVectors ? 1 : 0}`,
+  ];
+
+  // Add metadata column definitions
+  for (const col of metadataColumns) {
+    params.push(`${col.name} ${col.type}`);
+  }
+
+  const sql = `CREATE VIRTUAL TABLE ${tableName} USING diskann(${params.join(", ")})`;
 
   db.exec(sql);
 }
@@ -192,26 +237,33 @@ export function createDiskAnnIndex(
  *
  * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name of the DiskANN virtual table
- * @param queryVector - Query vector (must match index dimension)
+ * @param queryVector - Query vector as Float32Array or number[] (must match index dimension)
  * @param k - Number of neighbors to return (default: 10)
- * @param searchListSize - Search beam width (default: 100, higher = better recall but slower)
- * @returns Array of k nearest neighbors sorted by distance
+ * @returns Array of k nearest neighbors sorted by distance, including any metadata columns
  *
  * @example
  * ```ts
- * const results = searchNearest(db, "embeddings", [0.1, 0.2, ...], 10);
- * console.log(`Found ${results.length} neighbors`);
- * results.forEach(({ id, distance }) => {
- *   console.log(`ID: ${id}, Distance: ${distance}`);
+ * // Basic search
+ * const vec = new Float32Array([0.1, 0.2, 0.3]);
+ * const results = searchNearest(db, "embeddings", vec, 10);
+ * results.forEach(({ rowid, distance }) => {
+ *   console.log(`ID: ${rowid}, Distance: ${distance}`);
  * });
+ *
+ * // With metadata columns (use raw SQL for filtering)
+ * const stmt = db.prepare(`
+ *   SELECT rowid, distance, category, year
+ *   FROM photos
+ *   WHERE vector MATCH ? AND k = ? AND category = 'landscape'
+ * `);
+ * const filtered = stmt.all(vec, 10);
  * ```
  */
 export function searchNearest(
   db: DatabaseLike,
   tableName: string,
-  queryVector: number[],
-  k = 10,
-  searchListSize = 100
+  queryVector: Float32Array | number[],
+  k = 10
 ): NearestNeighborResult[] {
   // Validate table name to prevent SQL injection
   if (!isValidIdentifier(tableName)) {
@@ -221,57 +273,55 @@ export function searchNearest(
   }
 
   // Validate inputs
-  if (!Array.isArray(queryVector) || queryVector.length === 0) {
-    throw new Error("Query vector must be non-empty array");
+  if (!queryVector || queryVector.length === 0) {
+    throw new Error("Query vector must be non-empty array or Float32Array");
   }
   if (!Number.isInteger(k) || k <= 0) {
     throw new Error(`Invalid k: ${k} (must be positive integer)`);
   }
 
-  // Convert vector to JSON for SQLite
-  const vectorJson = JSON.stringify(queryVector);
+  // Convert to Float32Array if needed
+  const vecArray =
+    queryVector instanceof Float32Array ? queryVector : new Float32Array(queryVector);
 
-  // Execute search query
-  // Note: Actual SQL syntax depends on final C implementation
-  // This is a placeholder for the expected interface
+  // Execute search using MATCH operator
   // tableName is validated above, safe to interpolate
   const stmt = db.prepare(`
-    SELECT id, distance
+    SELECT rowid, distance
     FROM ${tableName}
-    WHERE diskann_search(vector, ?, ?, ?)
-    ORDER BY distance ASC
-    LIMIT ?
+    WHERE vector MATCH ? AND k = ?
   `);
 
-  const results = stmt.all(vectorJson, k, searchListSize, k) as Array<{
-    id: number;
-    distance: number;
-  }>;
-
-  return results.map((row) => ({
-    id: row.id,
-    distance: row.distance,
-  }));
+  const results = stmt.all(vecArray, k) as NearestNeighborResult[];
+  return results;
 }
 
 /**
  * Insert a vector into a DiskANN index
  *
+ * For indexes with metadata columns, use raw SQL instead to specify column names:
+ *
  * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name of the DiskANN virtual table
- * @param id - Unique identifier for this vector
- * @param vector - Vector to insert (must match index dimension)
+ * @param rowid - Unique row identifier for this vector
+ * @param vector - Vector as Float32Array or number[] (must match index dimension)
  *
  * @example
  * ```ts
- * insertVector(db, "embeddings", 1, [0.1, 0.2, 0.3, ...]);
+ * // Basic insert (no metadata)
+ * const vec = new Float32Array([0.1, 0.2, 0.3]);
+ * insertVector(db, "embeddings", 1, vec);
+ *
+ * // With metadata - use raw SQL to specify column names
+ * db.prepare("INSERT INTO photos(rowid, vector, category, year) VALUES (?, ?, ?, ?)")
+ *   .run(1, vec, 'landscape', 2024);
  * ```
  */
 export function insertVector(
   db: DatabaseLike,
   tableName: string,
-  id: number,
-  vector: number[]
+  rowid: number,
+  vector: Float32Array | number[]
 ): void {
   // Validate table name to prevent SQL injection
   if (!isValidIdentifier(tableName)) {
@@ -280,14 +330,20 @@ export function insertVector(
     );
   }
 
-  if (!Array.isArray(vector) || vector.length === 0) {
-    throw new Error("Vector must be non-empty array");
+  if (
+    !vector ||
+    (!(vector instanceof Float32Array) && !Array.isArray(vector)) ||
+    vector.length === 0
+  ) {
+    throw new Error("Vector must be non-empty array or Float32Array");
   }
 
-  const vectorJson = JSON.stringify(vector);
+  // Convert to Float32Array if needed
+  const vecArray = vector instanceof Float32Array ? vector : new Float32Array(vector);
+
   // tableName is validated above, safe to interpolate
-  const stmt = db.prepare(`INSERT INTO ${tableName}(id, vector) VALUES (?, ?)`);
-  stmt.run(id, vectorJson);
+  const stmt = db.prepare(`INSERT INTO ${tableName}(rowid, vector) VALUES (?, ?)`);
+  stmt.run(rowid, vecArray);
 }
 
 /**
@@ -295,9 +351,14 @@ export function insertVector(
  *
  * @param db - Database instance (supports node:sqlite, better-sqlite3, @photostructure/sqlite)
  * @param tableName - Name of the DiskANN virtual table
- * @param id - ID of vector to delete
+ * @param rowid - Row ID of vector to delete
+ *
+ * @example
+ * ```ts
+ * deleteVector(db, "embeddings", 1);
+ * ```
  */
-export function deleteVector(db: DatabaseLike, tableName: string, id: number): void {
+export function deleteVector(db: DatabaseLike, tableName: string, rowid: number): void {
   // Validate table name to prevent SQL injection
   if (!isValidIdentifier(tableName)) {
     throw new Error(
@@ -306,6 +367,6 @@ export function deleteVector(db: DatabaseLike, tableName: string, id: number): v
   }
 
   // tableName is validated above, safe to interpolate
-  const stmt = db.prepare(`DELETE FROM ${tableName} WHERE id = ?`);
-  stmt.run(id);
+  const stmt = db.prepare(`DELETE FROM ${tableName} WHERE rowid = ?`);
+  stmt.run(rowid);
 }
