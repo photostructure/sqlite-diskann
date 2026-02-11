@@ -12,6 +12,10 @@ SQLite extension for DiskANN approximate nearest neighbor vector search.
 
 A standalone SQLite extension implementing the [DiskANN algorithm](https://github.com/microsoft/DiskANN) for efficient vector similarity search at scale. Extracted from [libSQL's implementation](https://github.com/tursodatabase/libsql) and optimized for use as a standard SQLite extension.
 
+**This package is primarily designed for Node.js/TypeScript projects**--the releases include pre-built native binaries and TypeScript bindings. 
+
+The underlying C extension could certainly be compiled and used from other languages (Python, Ruby, Go, etc.) — see [Building from Source](#building-from-source) for the C API.
+
 **Key features:**
 
 - Scales to millions of vectors
