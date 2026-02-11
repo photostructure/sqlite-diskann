@@ -676,23 +676,27 @@ make test
 ### What Was Delivered
 
 **Core Implementation:**
+
 - All 9 public API functions implemented (8 original + filtered search)
 - 175 tests passing (126 C API + 49 vtab)
 - ASan + Valgrind clean (zero memory errors/leaks)
 - Virtual table interface with MATCH operator and metadata filtering
 
 **Cross-Platform Support:**
+
 - GitHub Actions CI/CD with 6 platform jobs (Linux/macOS/Windows × x64/ARM64)
 - All builds successful, tests passing on all platforms
 - Prebuilt binaries staged for npm distribution
 
 **npm Package:**
+
 - TypeScript wrapper complete (src/index.ts, 233 lines)
 - Full type definitions (src/types.ts)
 - Hybrid CJS/ESM support (package.json exports)
 - Comprehensive README (523 lines with examples, API reference)
 
 **Documentation:**
+
 - Complete API documentation in src/diskann.h
 - README with installation, quick start, examples
 - Virtual table usage patterns
@@ -711,11 +715,13 @@ make test
 ### Out of Scope (Tracked Elsewhere)
 
 **Benchmark TPP:** `_todo/20260210-benchmark-framework.md`
+
 - Large-scale testing (1M, 3M, 5M, 10M vectors)
 - Performance characterization across dimensions
 - Recall vs speed trade-off analysis
 
 **PhotoStructure Integration:**
+
 - Integration into PhotoStructure codebase
 - CLIP embedding migration
 - Production rollout plan
