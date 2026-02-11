@@ -45,6 +45,10 @@ SQLITE_EXTENSION_INIT1
 #define DISKANN_IDX_K 0x02
 #define DISKANN_IDX_LIMIT 0x04
 #define DISKANN_IDX_ROWID 0x08
+#define DISKANN_IDX_FILTER 0x10
+
+/* Maximum number of filter constraints in a single query */
+#define DISKANN_MAX_FILTERS 16
 
 /* Column indices in the vtab schema */
 #define DISKANN_COL_VECTOR 0
@@ -592,21 +596,86 @@ static int diskannDestroy(sqlite3_vtab *pVtab) {
   return SQLITE_OK;
 }
 
+/**************************************************************************
+** DiskAnnRowidSet — Pre-computed filter for beam search
+**
+** Built from SQL query on _attrs shadow table, used as DiskAnnFilterFn
+** callback context. Binary search on sorted rowid array.
+**************************************************************************/
+
+typedef struct DiskAnnRowidSet {
+  int64_t *rowids; /* Sorted ascending, sqlite3_malloc'd */
+  int count;
+} DiskAnnRowidSet;
+
+/* Binary search callback — compatible with DiskAnnFilterFn signature */
+static int rowid_set_contains(int64_t rowid, void *ctx) {
+  DiskAnnRowidSet *set = (DiskAnnRowidSet *)ctx;
+  int lo = 0, hi = set->count - 1;
+  while (lo <= hi) {
+    int mid = lo + (hi - lo) / 2;
+    if (set->rowids[mid] == rowid)
+      return 1;
+    if (set->rowids[mid] < rowid)
+      lo = mid + 1;
+    else
+      hi = mid - 1;
+  }
+  return 0;
+}
+
+static void rowid_set_free(DiskAnnRowidSet *set) {
+  if (set->rowids) {
+    sqlite3_free(set->rowids);
+    set->rowids = NULL;
+  }
+  set->count = 0;
+}
+
+/*
+** Map SQLite constraint op to SQL operator string.
+** Returns NULL for unsupported ops.
+*/
+static const char *constraint_op_to_sql(int op) {
+  switch (op) {
+  case SQLITE_INDEX_CONSTRAINT_EQ:
+    return "=";
+  case SQLITE_INDEX_CONSTRAINT_GT:
+    return ">";
+  case SQLITE_INDEX_CONSTRAINT_LE:
+    return "<=";
+  case SQLITE_INDEX_CONSTRAINT_LT:
+    return "<";
+  case SQLITE_INDEX_CONSTRAINT_GE:
+    return ">=";
+  case SQLITE_INDEX_CONSTRAINT_NE:
+    return "!=";
+  default:
+    return NULL;
+  }
+}
+
 /*
 ** xBestIndex — query planning.
-** Recognizes MATCH (vector search), EQ on k, LIMIT, and ROWID EQ.
+** Recognizes MATCH (vector search), EQ on k, LIMIT, ROWID EQ,
+** and metadata filter constraints (EQ/GT/LT/GE/LE/NE on columns >= 3).
 */
 static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
+  diskann_vtab *pVt = (diskann_vtab *)pVtab;
   int idxNum = 0;
-
-  (void)pVtab;
 
   /* Pass 1: Find constraint positions.
   ** SQLite presents constraints in arbitrary order, but xFilter reads argv
-  ** in a fixed order (MATCH, K, LIMIT, ROWID). We must assign argvIndex
-  ** values that match xFilter's consumption order, not constraint array
-  ** order. Record positions first, assign in pass 2. */
+  ** in a fixed order (MATCH, K, LIMIT, ROWID, then filters). We must assign
+  ** argvIndex values that match xFilter's consumption order, not constraint
+  ** array order. Record positions first, assign in pass 2. */
   int i_match = -1, i_k = -1, i_limit = -1, i_rowid = -1;
+
+  /* Filter constraints on metadata columns */
+  int n_filters = 0;
+  int i_filter[DISKANN_MAX_FILTERS];   /* constraint array index */
+  int filter_col[DISKANN_MAX_FILTERS]; /* col offset (iColumn - META_START) */
+  int filter_op[DISKANN_MAX_FILTERS];  /* SQLite op value */
 
   for (int i = 0; i < pInfo->nConstraint; i++) {
     struct sqlite3_index_constraint *c = &pInfo->aConstraint[i];
@@ -627,12 +696,24 @@ static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
     } else if (c->op == SQLITE_INDEX_CONSTRAINT_EQ && c->iColumn == -1) {
       i_rowid = i;
       idxNum |= DISKANN_IDX_ROWID;
+    } else if (c->iColumn >= DISKANN_COL_META_START &&
+               c->iColumn < DISKANN_COL_META_START + pVt->n_meta_cols &&
+               constraint_op_to_sql(c->op) != NULL &&
+               n_filters < DISKANN_MAX_FILTERS) {
+      /* Metadata filter constraint */
+      i_filter[n_filters] = i;
+      filter_col[n_filters] = c->iColumn - DISKANN_COL_META_START;
+      filter_op[n_filters] = c->op;
+      n_filters++;
     }
   }
 
+  if (n_filters > 0) {
+    idxNum |= DISKANN_IDX_FILTER;
+  }
+
   /* Pass 2: Assign argvIndex in the order xFilter consumes them.
-  ** This ensures argv[0] = MATCH, argv[1] = K, argv[2] = LIMIT, etc.
-  ** regardless of the order SQLite presented constraints. */
+  ** Order: MATCH, K, LIMIT, ROWID, then filter constraints. */
   int next_argv = 1;
   if (i_match >= 0) {
     pInfo->aConstraintUsage[i_match].argvIndex = next_argv++;
@@ -651,10 +732,30 @@ static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
     pInfo->aConstraintUsage[i_rowid].omit = 1;
   }
 
+  /* Assign argvIndex for filter constraints and build idxStr */
+  if (n_filters > 0) {
+    for (int i = 0; i < n_filters; i++) {
+      pInfo->aConstraintUsage[i_filter[i]].argvIndex = next_argv++;
+      pInfo->aConstraintUsage[i_filter[i]].omit = 0; /* SQLite double-checks */
+    }
+
+    /* Build idxStr: comma-separated "col_offset:op" pairs */
+    sqlite3_str *s = sqlite3_str_new(NULL);
+    for (int i = 0; i < n_filters; i++) {
+      if (i > 0)
+        sqlite3_str_appendall(s, ",");
+      sqlite3_str_appendf(s, "%d:%d", filter_col[i], filter_op[i]);
+    }
+    pInfo->idxStr = sqlite3_str_finish(s);
+    if (!pInfo->idxStr)
+      return SQLITE_NOMEM;
+    pInfo->needToFreeIdxStr = 1;
+  }
+
   pInfo->idxNum = idxNum;
 
   if (idxNum & DISKANN_IDX_MATCH) {
-    pInfo->estimatedCost = 100.0;
+    pInfo->estimatedCost = (n_filters > 0) ? 200.0 : 100.0;
     pInfo->estimatedRows = 10;
   } else if (idxNum & DISKANN_IDX_ROWID) {
     pInfo->estimatedCost = 1.0;
@@ -709,7 +810,6 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
   diskann_vtab *pVtab = (diskann_vtab *)pCursor->pVtab;
   int next = 0;
 
-  (void)idxStr;
   (void)argc;
 
   /* Free previous results */
@@ -754,7 +854,100 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
     if (!pCur->results)
       return SQLITE_NOMEM;
 
-    int rc = diskann_search(pVtab->idx, query, query_dims, k, pCur->results);
+    int rc;
+    if (idxNum & DISKANN_IDX_FILTER) {
+      /* Build rowid set from metadata filter constraints */
+      DiskAnnRowidSet rset = {NULL, 0};
+
+      /* Parse idxStr: comma-separated "col_offset:op" pairs */
+      int n_fc = 0;
+      int fc_col[DISKANN_MAX_FILTERS];
+      int fc_op[DISKANN_MAX_FILTERS];
+      if (idxStr) {
+        const char *p = idxStr;
+        while (*p && n_fc < DISKANN_MAX_FILTERS) {
+          fc_col[n_fc] = (int)strtol(p, (char **)&p, 10);
+          if (*p == ':')
+            p++;
+          fc_op[n_fc] = (int)strtol(p, (char **)&p, 10);
+          n_fc++;
+          if (*p == ',')
+            p++;
+        }
+      }
+
+      /* Build SQL: SELECT rowid FROM _attrs WHERE col1 op1 ? AND ... */
+      sqlite3_str *fs = sqlite3_str_new(pVtab->db);
+      sqlite3_str_appendf(fs, "SELECT rowid FROM \"%w\".\"%w_attrs\" WHERE 1=1",
+                          pVtab->db_name, pVtab->table_name);
+      for (int fi = 0; fi < n_fc; fi++) {
+        const char *op_str = constraint_op_to_sql(fc_op[fi]);
+        if (op_str && fc_col[fi] >= 0 && fc_col[fi] < pVtab->n_meta_cols) {
+          sqlite3_str_appendf(fs, " AND \"%w\" %s ?",
+                              pVtab->meta_cols[fc_col[fi]].name, op_str);
+        }
+      }
+      sqlite3_str_appendall(fs, " ORDER BY rowid");
+      char *filter_sql = sqlite3_str_finish(fs);
+      if (!filter_sql) {
+        sqlite3_free(pCur->results);
+        pCur->results = NULL;
+        return SQLITE_NOMEM;
+      }
+
+      /* Execute filter query */
+      sqlite3_stmt *fstmt;
+      rc = sqlite3_prepare_v2(pVtab->db, filter_sql, -1, &fstmt, NULL);
+      sqlite3_free(filter_sql);
+      if (rc != SQLITE_OK) {
+        sqlite3_free(pCur->results);
+        pCur->results = NULL;
+        return rc;
+      }
+
+      /* Bind filter values from argv */
+      for (int fi = 0; fi < n_fc; fi++) {
+        sqlite3_bind_value(fstmt, fi + 1, argv[next + fi]);
+      }
+
+      /* Collect rowids into dynamic array */
+      int cap = 64;
+      rset.rowids = sqlite3_malloc(cap * (int)sizeof(int64_t));
+      if (!rset.rowids) {
+        sqlite3_finalize(fstmt);
+        sqlite3_free(pCur->results);
+        pCur->results = NULL;
+        return SQLITE_NOMEM;
+      }
+      rset.count = 0;
+
+      while (sqlite3_step(fstmt) == SQLITE_ROW) {
+        if (rset.count >= cap) {
+          cap *= 2;
+          int64_t *tmp =
+              sqlite3_realloc(rset.rowids, cap * (int)sizeof(int64_t));
+          if (!tmp) {
+            sqlite3_finalize(fstmt);
+            rowid_set_free(&rset);
+            sqlite3_free(pCur->results);
+            pCur->results = NULL;
+            return SQLITE_NOMEM;
+          }
+          rset.rowids = tmp;
+        }
+        rset.rowids[rset.count++] = sqlite3_column_int64(fstmt, 0);
+      }
+      sqlite3_finalize(fstmt);
+
+      /* Run filtered search */
+      rc = diskann_search_filtered(pVtab->idx, query, query_dims, k,
+                                   pCur->results, rowid_set_contains, &rset);
+      rowid_set_free(&rset);
+    } else {
+      /* Unfiltered search */
+      rc = diskann_search(pVtab->idx, query, query_dims, k, pCur->results);
+    }
+
     if (rc < 0) {
       sqlite3_free(pCur->results);
       pCur->results = NULL;

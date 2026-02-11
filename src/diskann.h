@@ -80,6 +80,13 @@ typedef struct DiskAnnResult {
 } DiskAnnResult;
 
 /*
+** Filter callback for filtered search.
+** Returns 1 to accept rowid in top-K results, 0 to reject.
+** Rejected nodes are still visited for graph traversal (graph bridges).
+*/
+typedef int (*DiskAnnFilterFn)(int64_t rowid, void *ctx);
+
+/*
 ** Create a new DiskANN index with the specified configuration.
 **
 ** Parameters:
@@ -151,6 +158,32 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
 */
 int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
                    DiskAnnResult *results);
+
+/*
+** Search for k-nearest neighbors with a filter callback.
+**
+** Same as diskann_search() but only nodes accepted by filter_fn are
+** included in results. Non-matching nodes are still traversed as graph
+** bridges. Uses a wider beam to compensate for filtered-out candidates.
+**
+** If filter_fn is NULL, behaves identically to diskann_search().
+**
+** Parameters:
+**   idx        - Index handle
+**   query      - Query vector (float32 array)
+**   dims       - Query dimensions (must match index configuration)
+**   k          - Number of results to return
+**   results    - Result array (caller must allocate k elements)
+**   filter_fn  - Filter callback (NULL = no filter)
+**   filter_ctx - Opaque context passed to filter_fn
+**
+** Returns:
+**   Number of results found (may be < k if not enough vectors match),
+**   or negative error code on failure
+*/
+int diskann_search_filtered(DiskAnnIndex *idx, const float *query,
+                            uint32_t dims, int k, DiskAnnResult *results,
+                            DiskAnnFilterFn filter_fn, void *filter_ctx);
 
 /*
 ** Delete a vector from the index.

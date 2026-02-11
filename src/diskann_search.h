@@ -47,7 +47,9 @@ typedef struct DiskAnnSearchCtx {
   int max_top_candidates;    /* = k */
   DiskAnnNode *visited_list; /* linked list of visited nodes */
   int n_unvisited;
-  int blob_mode; /* DISKANN_BLOB_READONLY or WRITABLE */
+  int blob_mode;             /* DISKANN_BLOB_READONLY or WRITABLE */
+  DiskAnnFilterFn filter_fn; /* NULL = no filter (accept all) */
+  void *filter_ctx;          /* Opaque context for filter_fn */
 } DiskAnnSearchCtx;
 
 /*

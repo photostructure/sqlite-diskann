@@ -66,6 +66,13 @@ static void search_ctx_mark_visited(DiskAnnSearchCtx *ctx, DiskAnnNode *node,
   node->next = ctx->visited_list;
   ctx->visited_list = node;
 
+  /* Filter gate: skip top-K insertion if filter rejects this rowid.
+  ** Node is still visited (graph bridge) — only result set is filtered. */
+  if (ctx->filter_fn &&
+      !ctx->filter_fn((int64_t)node->rowid, ctx->filter_ctx)) {
+    return;
+  }
+
   int insert_idx =
       distance_buffer_insert_idx(ctx->top_distances, ctx->n_top_candidates,
                                  ctx->max_top_candidates, distance);
@@ -164,6 +171,8 @@ int diskann_search_ctx_init(DiskAnnSearchCtx *ctx, const float *query,
   ctx->visited_list = NULL;
   ctx->n_unvisited = 0;
   ctx->blob_mode = blob_mode;
+  ctx->filter_fn = NULL;
+  ctx->filter_ctx = NULL;
 
   ctx->distances = (float *)sqlite3_malloc(max_candidates * (int)sizeof(float));
   ctx->candidates = (DiskAnnNode **)sqlite3_malloc(max_candidates *
@@ -424,5 +433,72 @@ int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
 
   diskann_search_ctx_deinit(&ctx);
 
+  return n_results;
+}
+
+int diskann_search_filtered(DiskAnnIndex *idx, const float *query,
+                            uint32_t dims, int k, DiskAnnResult *results,
+                            DiskAnnFilterFn filter_fn, void *filter_ctx) {
+  DiskAnnSearchCtx ctx;
+  uint64_t start_rowid = 0;
+  int rc;
+
+  /* Same validation as diskann_search() */
+  if (!idx)
+    return DISKANN_ERROR_INVALID;
+  if (!query)
+    return DISKANN_ERROR_INVALID;
+  if (!results)
+    return DISKANN_ERROR_INVALID;
+  if (k < 0)
+    return DISKANN_ERROR_INVALID;
+  if (dims != idx->dimensions)
+    return DISKANN_ERROR_DIMENSION;
+  if (k == 0)
+    return 0;
+
+  /* NULL filter → fall through to unfiltered search */
+  if (!filter_fn) {
+    return diskann_search(idx, query, dims, k, results);
+  }
+
+  /* Find a random start node */
+  rc = diskann_select_random_shadow_row(idx, &start_rowid);
+  if (rc == SQLITE_DONE) {
+    return 0; /* Empty table */
+  }
+  if (rc != DISKANN_OK) {
+    return DISKANN_ERROR;
+  }
+
+  /* Wider beam to compensate for filtered-out candidates */
+  uint32_t beam = idx->search_list_size * 2;
+  uint32_t k_scaled = (uint32_t)k * 4;
+  int max_candidates = (int)(beam > k_scaled ? beam : k_scaled);
+
+  /* Initialize search context with filter */
+  rc = diskann_search_ctx_init(&ctx, query, max_candidates, k,
+                               DISKANN_BLOB_READONLY);
+  if (rc != DISKANN_OK) {
+    return rc;
+  }
+  ctx.filter_fn = filter_fn;
+  ctx.filter_ctx = filter_ctx;
+
+  /* Run beam search */
+  rc = diskann_search_internal(idx, &ctx, start_rowid);
+  if (rc != DISKANN_OK) {
+    diskann_search_ctx_deinit(&ctx);
+    return rc;
+  }
+
+  /* Copy top-K results to caller's array */
+  int n_results = k < ctx.n_top_candidates ? k : ctx.n_top_candidates;
+  for (int i = 0; i < n_results; i++) {
+    results[i].id = (int64_t)ctx.top_candidates[i]->rowid;
+    results[i].distance = ctx.top_distances[i];
+  }
+
+  diskann_search_ctx_deinit(&ctx);
   return n_results;
 }

@@ -50,9 +50,9 @@ Build phases execute sequentially. Each has its own 8-phase lifecycle:
 | --------- | ----------------------------------------- | --------- | ---------------------------------------------- |
 | 0 DONE    | `20260210-vtab-phase0-entry-points.md`    | 0 (infra) | Consolidate entry points, extract shared utils |
 | 1 DONE    | `20260210-vtab-phase1-basic-vtab.md`      | 19        | CREATE/INSERT/SEARCH/DELETE via SQL            |
-| 2         | `20260210-vtab-phase2-metadata.md`        | 13        | Metadata columns, schema persistence           |
+| 2 DONE    | `20260210-vtab-phase2-metadata.md`        | 14        | Metadata columns, schema persistence           |
 | 3         | `20260210-vtab-phase3-filtered-search.md` | 16        | Filter during beam search, C API + SQL         |
-| **Total** |                                           | **48**    |                                                |
+| **Total** |                                           | **49**    |                                                |
 
 Phase 4 (Polish — TS bindings, JSON vectors, README) is tracked inline below.
 
@@ -105,7 +105,7 @@ Col 0=vector, 1=distance, 2=k (all HIDDEN). Col 3+ = metadata (visible in SELECT
 
 ### xBestIndex Encoding
 
-`idxNum` bitmask: MATCH=0x01, K=0x02, LIMIT=0x04, FILTER=0x08. Conditional argvIndex assignment. Phase 3 filter constraints encoded in `idxStr` as comma-separated `"col_offset:op"` pairs.
+`idxNum` bitmask: MATCH=0x01, K=0x02, LIMIT=0x04, ROWID=0x08, FILTER=0x10. Conditional argvIndex assignment. Phase 3 filter constraints encoded in `idxStr` as comma-separated `"col_offset:op"` pairs.
 
 ### Filter Gate (Phase 3)
 
@@ -121,6 +121,7 @@ See child TPPs for full implementation details per phase.
 - [ ] Support JSON vector input (`'[1.0, 2.0]'` TEXT) in INSERT
 - [ ] Improve error messages with `pVtab->base.zErrMsg`
 - [ ] Update README with virtual table examples
+- [ ] Document metadata column indexing recommendation (`CREATE INDEX` on `_attrs` columns used in filters)
 
 ## Critical Files
 

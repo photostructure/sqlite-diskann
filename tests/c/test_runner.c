@@ -206,6 +206,24 @@ extern void test_vtab_meta_delete(void);
 extern void test_vtab_meta_reopen(void);
 extern void test_vtab_meta_drop(void);
 
+/* Phase 3: Virtual table filtered search tests */
+extern void test_search_filtered_null_filter(void);
+extern void test_search_filtered_accept_all(void);
+extern void test_search_filtered_reject_all(void);
+extern void test_search_filtered_odd_only(void);
+extern void test_search_filtered_validation(void);
+extern void test_vtab_filter_eq(void);
+extern void test_vtab_filter_eq_other(void);
+extern void test_vtab_filter_gt(void);
+extern void test_vtab_filter_lt(void);
+extern void test_vtab_filter_between(void);
+extern void test_vtab_filter_multi(void);
+extern void test_vtab_filter_no_match(void);
+extern void test_vtab_filter_all_match(void);
+extern void test_vtab_filter_ne(void);
+extern void test_vtab_filter_recall(void);
+extern void test_vtab_filter_graph_bridge(void);
+
 void setUp(void) { /* Global setup if needed */ }
 
 void tearDown(void) { /* Global teardown if needed */ }
@@ -421,6 +439,24 @@ int main(void) {
   RUN_TEST(test_vtab_meta_delete);
   RUN_TEST(test_vtab_meta_reopen);
   RUN_TEST(test_vtab_meta_drop);
+
+  /* Virtual table filtered search tests (Phase 3) */
+  RUN_TEST(test_search_filtered_null_filter);
+  RUN_TEST(test_search_filtered_accept_all);
+  RUN_TEST(test_search_filtered_reject_all);
+  RUN_TEST(test_search_filtered_odd_only);
+  RUN_TEST(test_search_filtered_validation);
+  RUN_TEST(test_vtab_filter_eq);
+  RUN_TEST(test_vtab_filter_eq_other);
+  RUN_TEST(test_vtab_filter_gt);
+  RUN_TEST(test_vtab_filter_lt);
+  RUN_TEST(test_vtab_filter_between);
+  RUN_TEST(test_vtab_filter_multi);
+  RUN_TEST(test_vtab_filter_no_match);
+  RUN_TEST(test_vtab_filter_all_match);
+  RUN_TEST(test_vtab_filter_ne);
+  RUN_TEST(test_vtab_filter_recall);
+  RUN_TEST(test_vtab_filter_graph_bridge);
 
   return UNITY_END();
 }

@@ -4,11 +4,13 @@
 ** Phase 1: 19 tests covering CREATE/DROP, INSERT, SEARCH, DELETE, PERSISTENCE
 ** Phase 2: 14 tests covering metadata columns (CREATE/INSERT/SELECT/DELETE/
 **          PERSIST/DROP with user-defined metadata columns)
+** Phase 3: 16 tests covering filtered search (5 C API + 11 SQL)
 **
 ** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
 #include "unity/unity.h"
+#include <math.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -863,6 +865,594 @@ void test_vtab_meta_drop(void) {
   TEST_ASSERT_FALSE(table_exists(db, "t_metadata"));
   TEST_ASSERT_FALSE(table_exists(db, "t_attrs"));
   TEST_ASSERT_FALSE(table_exists(db, "t_columns"));
+
+  sqlite3_close(db);
+}
+
+/**************************************************************************
+** Phase 3: Filtered search tests (16)
+**
+** Tests 34-38: C API filter tests (diskann_search_filtered)
+** Tests 39-49: SQL filter tests (vtab WHERE clauses on metadata columns)
+**************************************************************************/
+
+/* --- Filter callback helpers --- */
+
+static int filter_accept_all(int64_t rowid, void *ctx) {
+  (void)rowid;
+  (void)ctx;
+  return 1;
+}
+
+static int filter_reject_all(int64_t rowid, void *ctx) {
+  (void)rowid;
+  (void)ctx;
+  return 0;
+}
+
+static int filter_accept_odd(int64_t rowid, void *ctx) {
+  (void)ctx;
+  return (rowid % 2) != 0;
+}
+
+/*
+** Helper: create a 3D euclidean index with 10 vectors via C API.
+** Returns open index in *out_idx. Caller must close with diskann_close_index().
+** db handle stored in *out_db. Caller must sqlite3_close().
+*/
+static void create_filter_index(sqlite3 **out_db, DiskAnnIndex **out_idx) {
+  sqlite3 *db;
+  int rc = sqlite3_open(":memory:", &db);
+  TEST_ASSERT_EQUAL_INT(SQLITE_OK, rc);
+
+  DiskAnnConfig config = {.dimensions = 3,
+                          .metric = DISKANN_METRIC_EUCLIDEAN,
+                          .max_neighbors = 32,
+                          .search_list_size = 100,
+                          .insert_list_size = 200,
+                          .block_size = 4096};
+  rc = diskann_create_index(db, "main", "idx", &config);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  DiskAnnIndex *idx = NULL;
+  rc = diskann_open_index(db, "main", "idx", &idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  /* Insert 10 vectors spread along x-axis */
+  for (int i = 1; i <= 10; i++) {
+    float vec[] = {(float)i * 0.1f, 0.0f, 0.0f};
+    rc = diskann_insert(idx, (int64_t)i, vec, 3);
+    TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+  }
+
+  *out_db = db;
+  *out_idx = idx;
+}
+
+/* ---- C API Filter Tests (5 tests, #34-#38) ---- */
+
+void test_search_filtered_null_filter(void) {
+  sqlite3 *db;
+  DiskAnnIndex *idx;
+  create_filter_index(&db, &idx);
+
+  float query[] = {0.5f, 0.0f, 0.0f};
+  DiskAnnResult results[5];
+
+  /* NULL filter should behave identically to diskann_search() */
+  int n = diskann_search_filtered(idx, query, 3, 5, results, NULL, NULL);
+  TEST_ASSERT_GREATER_THAN(0, n);
+  TEST_ASSERT_LESS_OR_EQUAL(5, n);
+
+  /* Compare with unfiltered search */
+  DiskAnnResult unfiltered[5];
+  int n2 = diskann_search(idx, query, 3, 5, unfiltered);
+  TEST_ASSERT_EQUAL_INT(n2, n);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_search_filtered_accept_all(void) {
+  sqlite3 *db;
+  DiskAnnIndex *idx;
+  create_filter_index(&db, &idx);
+
+  float query[] = {0.5f, 0.0f, 0.0f};
+  DiskAnnResult results[5];
+
+  int n = diskann_search_filtered(idx, query, 3, 5, results, filter_accept_all,
+                                  NULL);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  /* Same count as unfiltered */
+  DiskAnnResult unfiltered[5];
+  int n2 = diskann_search(idx, query, 3, 5, unfiltered);
+  TEST_ASSERT_EQUAL_INT(n2, n);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_search_filtered_reject_all(void) {
+  sqlite3 *db;
+  DiskAnnIndex *idx;
+  create_filter_index(&db, &idx);
+
+  float query[] = {0.5f, 0.0f, 0.0f};
+  DiskAnnResult results[5];
+
+  int n = diskann_search_filtered(idx, query, 3, 5, results, filter_reject_all,
+                                  NULL);
+  TEST_ASSERT_EQUAL_INT(0, n);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_search_filtered_odd_only(void) {
+  sqlite3 *db;
+  DiskAnnIndex *idx;
+  create_filter_index(&db, &idx);
+
+  float query[] = {0.5f, 0.0f, 0.0f};
+  DiskAnnResult results[5];
+
+  int n = diskann_search_filtered(idx, query, 3, 5, results, filter_accept_odd,
+                                  NULL);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  /* All returned IDs must be odd */
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(results[i].id % 2 != 0,
+                             "Expected only odd rowids in results");
+  }
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_search_filtered_validation(void) {
+  sqlite3 *db;
+  DiskAnnIndex *idx;
+  create_filter_index(&db, &idx);
+
+  float query[] = {0.5f, 0.0f, 0.0f};
+  DiskAnnResult results[5];
+
+  /* NULL index */
+  TEST_ASSERT_LESS_THAN(
+      0, diskann_search_filtered(NULL, query, 3, 5, results, NULL, NULL));
+  /* NULL query */
+  TEST_ASSERT_LESS_THAN(
+      0, diskann_search_filtered(idx, NULL, 3, 5, results, NULL, NULL));
+  /* NULL results */
+  TEST_ASSERT_LESS_THAN(
+      0, diskann_search_filtered(idx, query, 3, 5, NULL, NULL, NULL));
+  /* Wrong dimensions */
+  TEST_ASSERT_LESS_THAN(
+      0, diskann_search_filtered(idx, query, 99, 5, results, NULL, NULL));
+  /* k = 0 → returns 0 (not an error) */
+  TEST_ASSERT_EQUAL_INT(
+      0, diskann_search_filtered(idx, query, 3, 0, results, NULL, NULL));
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+/* ---- SQL Filter Test Helpers ---- */
+
+/*
+** Helper: create 3D euclidean vtab "t" with (category TEXT, score REAL)
+** and insert 20 vectors.
+** IDs 1-10: category='A', score=i*0.1. Vectors spread along x-axis.
+** IDs 11-20: category='B', score=i*0.1+1.0. Vectors spread along y-axis.
+*/
+static sqlite3 *create_filter_vtab(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(db, "CREATE VIRTUAL TABLE t USING diskann("
+              "dimension=3, metric=euclidean, category TEXT, score REAL)");
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      db, "INSERT INTO t(rowid, vector, category, score) VALUES (?, ?, ?, ?)",
+      -1, &stmt, NULL);
+  TEST_ASSERT_EQUAL_INT(SQLITE_OK, rc);
+
+  for (int i = 1; i <= 20; i++) {
+    float vec[3];
+    const char *cat;
+    double score;
+    if (i <= 10) {
+      vec[0] = (float)i * 0.1f;
+      vec[1] = 0.0f;
+      vec[2] = 0.0f;
+      cat = "A";
+      score = (double)i * 0.1;
+    } else {
+      vec[0] = 0.0f;
+      vec[1] = (float)(i - 10) * 0.1f;
+      vec[2] = 0.0f;
+      cat = "B";
+      score = (double)(i - 10) * 0.1 + 1.0;
+    }
+    sqlite3_reset(stmt);
+    sqlite3_bind_int64(stmt, 1, (int64_t)i);
+    sqlite3_bind_blob(stmt, 2, vec, (int)sizeof(vec), SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, cat, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 4, score);
+    rc = sqlite3_step(stmt);
+    TEST_ASSERT_EQUAL_INT(SQLITE_DONE, rc);
+  }
+  sqlite3_finalize(stmt);
+  return db;
+}
+
+/*
+** Helper: run filtered MATCH search. The where_extra is appended after
+** the MATCH and k constraints. It should start with " AND ..." if filtering.
+** Returns the number of rows.
+*/
+static int search_vtab_filtered(sqlite3 *db, const char *table,
+                                const float *query, int query_bytes, int k,
+                                const char *where_extra, int64_t *out_rowids,
+                                float *out_distances, int max_results) {
+  char *sql = sqlite3_mprintf("SELECT rowid, distance FROM %s "
+                              "WHERE vector MATCH ?1 AND k = ?2%s",
+                              table, where_extra ? where_extra : "");
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  sqlite3_free(sql);
+  TEST_ASSERT_EQUAL_INT(SQLITE_OK, rc);
+
+  sqlite3_bind_blob(stmt, 1, query, query_bytes, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 2, k);
+
+  int count = 0;
+  while (sqlite3_step(stmt) == SQLITE_ROW && count < max_results) {
+    if (out_rowids)
+      out_rowids[count] = sqlite3_column_int64(stmt, 0);
+    if (out_distances)
+      out_distances[count] = (float)sqlite3_column_double(stmt, 1);
+    count++;
+  }
+  sqlite3_finalize(stmt);
+  return count;
+}
+
+/* ---- SQL Filter Tests (11 tests, #39-#49) ---- */
+
+void test_vtab_filter_eq(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f}; /* Between A and B clusters */
+  int64_t rowids[20];
+
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND category = 'A'", rowids, NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  /* All results must have category 'A' (rowids 1-10) */
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 1 && rowids[i] <= 10,
+                             "Expected only category A rowids (1-10)");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_eq_other(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f};
+  int64_t rowids[20];
+
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND category = 'B'", rowids, NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  /* All results must have category 'B' (rowids 11-20) */
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 11 && rowids[i] <= 20,
+                             "Expected only category B rowids (11-20)");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_gt(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f};
+  int64_t rowids[20];
+
+  /* score > 1.0 → only IDs 11-20 (B cluster, scores 1.1-2.0) */
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND score > 1.0", rowids, NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 11 && rowids[i] <= 20,
+                             "Expected only rowids 11-20 for score > 1.0");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_lt(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.2f, 0.0f, 0.0f}; /* Near A cluster */
+  int64_t rowids[20];
+
+  /* score < 0.5 → only IDs 1-4 (A cluster, scores 0.1-0.4) */
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND score < 0.5", rowids, NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 1 && rowids[i] <= 4,
+                             "Expected only rowids 1-4 for score < 0.5");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_between(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f};
+  int64_t rowids[20];
+
+  /* score >= 0.5 AND score <= 1.5 → IDs 5-15
+   * (A: IDs 5-10, scores 0.5-1.0; B: IDs 11-15, scores 1.1-1.5) */
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND score >= 0.5 AND score <= 1.5", rowids,
+                               NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 5 && rowids[i] <= 15,
+                             "Expected only rowids 5-15 for 0.5<=score<=1.5");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_multi(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.8f, 0.0f, 0.0f}; /* Near high-end A cluster */
+  int64_t rowids[20];
+
+  /* category = 'A' AND score > 0.5 → IDs 6-10 */
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND category = 'A' AND score > 0.5", rowids,
+                               NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 6 && rowids[i] <= 10,
+                             "Expected only rowids 6-10 for A & score>0.5");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_no_match(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f};
+  int64_t rowids[20];
+
+  /* category = 'C' → no matching rows */
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 10,
+                               " AND category = 'C'", rowids, NULL, 20);
+  TEST_ASSERT_EQUAL_INT(0, n);
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_all_match(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f};
+  int64_t rowids[20];
+
+  /* score > 0.0 → all 20 rows match. With k=10, should be same as unfiltered.
+   */
+  int n_filtered = search_vtab_filtered(db, "t", query, (int)sizeof(query), 10,
+                                        " AND score > 0.0", rowids, NULL, 20);
+  int n_unfiltered =
+      search_vtab(db, "t", query, (int)sizeof(query), 10, NULL, NULL, 20);
+  TEST_ASSERT_EQUAL_INT(n_unfiltered, n_filtered);
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_ne(void) {
+  sqlite3 *db = create_filter_vtab();
+  float query[] = {0.5f, 0.5f, 0.0f};
+  int64_t rowids[20];
+
+  /* category != 'A' → only B rows (11-20) */
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 20,
+                               " AND category != 'A'", rowids, NULL, 20);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  for (int i = 0; i < n; i++) {
+    TEST_ASSERT_TRUE_MESSAGE(rowids[i] >= 11 && rowids[i] <= 20,
+                             "Expected only category B rowids (11-20)");
+  }
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_recall(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(db, "CREATE VIRTUAL TABLE t USING diskann("
+              "dimension=128, metric=euclidean, category TEXT)");
+
+  /* Insert 200 vectors (100 per category) with deterministic values */
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      db, "INSERT INTO t(rowid, vector, category) VALUES (?, ?, ?)", -1, &stmt,
+      NULL);
+  TEST_ASSERT_EQUAL_INT(SQLITE_OK, rc);
+
+  float vec[128];
+  srand(42); /* deterministic seed */
+  for (int i = 1; i <= 200; i++) {
+    for (int d = 0; d < 128; d++) {
+      vec[d] = (float)rand() / (float)RAND_MAX;
+    }
+    const char *cat = (i <= 100) ? "A" : "B";
+    sqlite3_reset(stmt);
+    sqlite3_bind_int64(stmt, 1, (int64_t)i);
+    sqlite3_bind_blob(stmt, 2, vec, (int)sizeof(vec), SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, cat, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    TEST_ASSERT_EQUAL_INT(SQLITE_DONE, rc);
+  }
+  sqlite3_finalize(stmt);
+
+  /* Generate a query near category A vectors */
+  srand(42); /* Same seed → first generated vector is ID 1 */
+  float query[128];
+  for (int d = 0; d < 128; d++) {
+    query[d] = (float)rand() / (float)RAND_MAX + 0.01f; /* Slightly offset */
+  }
+
+  /* Brute-force: find top-10 among category='A' by distance */
+  float brute_dists[100];
+  int64_t brute_ids[100];
+  for (int i = 1; i <= 100; i++) {
+    /* Reconstruct vector for ID i (deterministic from seed 42) */
+    srand(42);
+    for (int skip = 0; skip < (i - 1); skip++) {
+      for (int d = 0; d < 128; d++)
+        (void)rand();
+    }
+    float v[128];
+    for (int d = 0; d < 128; d++)
+      v[d] = (float)rand() / (float)RAND_MAX;
+
+    /* Euclidean distance squared (monotonic, no sqrt needed for ranking) */
+    float dist = 0.0f;
+    for (int d = 0; d < 128; d++) {
+      float diff = query[d] - v[d];
+      dist += diff * diff;
+    }
+    brute_dists[i - 1] = dist;
+    brute_ids[i - 1] = (int64_t)i;
+  }
+
+  /* Sort brute-force results by distance (insertion sort, small N) */
+  for (int i = 1; i < 100; i++) {
+    float key_dist = brute_dists[i];
+    int64_t key_id = brute_ids[i];
+    int j = i - 1;
+    while (j >= 0 && brute_dists[j] > key_dist) {
+      brute_dists[j + 1] = brute_dists[j];
+      brute_ids[j + 1] = brute_ids[j];
+      j--;
+    }
+    brute_dists[j + 1] = key_dist;
+    brute_ids[j + 1] = key_id;
+  }
+
+  /* Filtered search: category = 'A', k = 10 */
+  int64_t ann_ids[10];
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 10,
+                               " AND category = 'A'", ann_ids, NULL, 10);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  /* Compute recall: how many of brute-force top-10 appear in ANN results? */
+  int hits = 0;
+  for (int i = 0; i < (n < 10 ? n : 10); i++) {
+    for (int j = 0; j < 10; j++) {
+      if (ann_ids[i] == brute_ids[j]) {
+        hits++;
+        break;
+      }
+    }
+  }
+
+  float recall = (float)hits / 10.0f;
+  /* printf("  Filtered recall@10: %.0f%% (%d/10 hits)\n", recall * 100, hits);
+   */
+  TEST_ASSERT_TRUE_MESSAGE(recall >= 0.5f,
+                           "Filtered recall@10 should be >= 50%");
+
+  sqlite3_close(db);
+}
+
+void test_vtab_filter_graph_bridge(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(db, "CREATE VIRTUAL TABLE t USING diskann("
+              "dimension=3, metric=euclidean, category TEXT)");
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      db, "INSERT INTO t(rowid, vector, category) VALUES (?, ?, ?)", -1, &stmt,
+      NULL);
+  TEST_ASSERT_EQUAL_INT(SQLITE_OK, rc);
+
+  /*
+  ** Construct a graph where the nearest 'A' node to the query is only
+  ** reachable through 'B' bridge nodes:
+  **
+  ** 1. Insert B cluster near origin (10 nodes): graph connects through these
+  ** 2. Insert distant A cluster (5 nodes at x=10..14): far from query
+  ** 3. Insert A_near (ID 16) very close to query at [0.05, 0, 0]
+  **
+  ** The DiskANN graph connects A_near to B cluster members (nearest
+  ** neighbors at insert time). When filtering for category='A', the search
+  ** must traverse B nodes (graph bridges) to reach A_near.
+  */
+
+  /* B cluster near origin: IDs 1-10 */
+  for (int i = 1; i <= 10; i++) {
+    float vec[] = {(float)i * 0.1f, 0.0f, 0.0f};
+    sqlite3_reset(stmt);
+    sqlite3_bind_int64(stmt, 1, (int64_t)i);
+    sqlite3_bind_blob(stmt, 2, vec, (int)sizeof(vec), SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, "B", -1, SQLITE_STATIC);
+    TEST_ASSERT_EQUAL_INT(SQLITE_DONE, sqlite3_step(stmt));
+  }
+
+  /* Distant A cluster: IDs 11-15 */
+  for (int i = 11; i <= 15; i++) {
+    float vec[] = {(float)i, 0.0f, 0.0f};
+    sqlite3_reset(stmt);
+    sqlite3_bind_int64(stmt, 1, (int64_t)i);
+    sqlite3_bind_blob(stmt, 2, vec, (int)sizeof(vec), SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, "A", -1, SQLITE_STATIC);
+    TEST_ASSERT_EQUAL_INT(SQLITE_DONE, sqlite3_step(stmt));
+  }
+
+  /* A_near: ID 16, very close to query at origin */
+  {
+    float vec[] = {0.05f, 0.0f, 0.0f};
+    sqlite3_reset(stmt);
+    sqlite3_bind_int64(stmt, 1, 16);
+    sqlite3_bind_blob(stmt, 2, vec, (int)sizeof(vec), SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, "A", -1, SQLITE_STATIC);
+    TEST_ASSERT_EQUAL_INT(SQLITE_DONE, sqlite3_step(stmt));
+  }
+
+  sqlite3_finalize(stmt);
+
+  /* Query at origin, filter for category='A' */
+  float query[] = {0.0f, 0.0f, 0.0f};
+  int64_t rowids[6];
+  int n = search_vtab_filtered(db, "t", query, (int)sizeof(query), 6,
+                               " AND category = 'A'", rowids, NULL, 6);
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  /* A_near (ID 16) should be the closest A node.
+  ** If graph bridge works, it appears in results. */
+  int found_near = 0;
+  for (int i = 0; i < n; i++) {
+    if (rowids[i] == 16) {
+      found_near = 1;
+      break;
+    }
+  }
+  TEST_ASSERT_TRUE_MESSAGE(found_near,
+                           "A_near (ID 16) should be found via B graph bridge");
 
   sqlite3_close(db);
 }
