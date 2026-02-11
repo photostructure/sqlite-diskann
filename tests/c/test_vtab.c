@@ -30,7 +30,12 @@
 extern int sqlite3_diskann_init(sqlite3 *db, char **pzErrMsg,
                                 const sqlite3_api_routines *pApi);
 
+/* Platform-specific temp directory */
+#ifdef _WIN32
+#define VTAB_TEST_DB "diskann_test_vtab.db"
+#else
 #define VTAB_TEST_DB "/tmp/diskann_test_vtab.db"
+#endif
 
 /**************************************************************************
 ** Helpers
