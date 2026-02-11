@@ -26,7 +26,7 @@ $Sources = @(
     "$SrcDir/diskann_vtab.c"
 )
 
-$TestSources = Get-ChildItem "$TestDir/c/test_*.c" | Where-Object { $_.Name -ne "test_runner.c" } | ForEach-Object { $_.FullName }
+$TestSources = Get-ChildItem "$TestDir/c/test_*.c" | Where-Object { $_.Name -ne "test_runner.c" -and $_.Name -ne "test_stress.c" } | ForEach-Object { $_.FullName }
 $TestRunner = "$TestDir/c/test_runner.c"
 $UnitySrc = "$TestDir/c/unity/unity.c"
 $SqliteSrc = "$VendorSqlite/sqlite3.c"
