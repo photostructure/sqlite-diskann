@@ -190,6 +190,22 @@ extern void test_vtab_delete(void);
 extern void test_vtab_delete_nonexistent(void);
 extern void test_vtab_reopen(void);
 
+/* Phase 2: Virtual table metadata column tests */
+extern void test_vtab_meta_create(void);
+extern void test_vtab_meta_create_all_types(void);
+extern void test_vtab_meta_create_invalid_type(void);
+extern void test_vtab_meta_create_invalid_name(void);
+extern void test_vtab_meta_create_reserved_name(void);
+extern void test_vtab_meta_create_duplicate_col(void);
+extern void test_vtab_meta_insert(void);
+extern void test_vtab_meta_insert_null(void);
+extern void test_vtab_meta_insert_partial(void);
+extern void test_vtab_meta_search_returns_cols(void);
+extern void test_vtab_meta_select_star(void);
+extern void test_vtab_meta_delete(void);
+extern void test_vtab_meta_reopen(void);
+extern void test_vtab_meta_drop(void);
+
 void setUp(void) { /* Global setup if needed */ }
 
 void tearDown(void) { /* Global teardown if needed */ }
@@ -389,6 +405,22 @@ int main(void) {
   RUN_TEST(test_vtab_delete);
   RUN_TEST(test_vtab_delete_nonexistent);
   RUN_TEST(test_vtab_reopen);
+
+  /* Virtual table metadata column tests (Phase 2) */
+  RUN_TEST(test_vtab_meta_create);
+  RUN_TEST(test_vtab_meta_create_all_types);
+  RUN_TEST(test_vtab_meta_create_invalid_type);
+  RUN_TEST(test_vtab_meta_create_invalid_name);
+  RUN_TEST(test_vtab_meta_create_reserved_name);
+  RUN_TEST(test_vtab_meta_create_duplicate_col);
+  RUN_TEST(test_vtab_meta_insert);
+  RUN_TEST(test_vtab_meta_insert_null);
+  RUN_TEST(test_vtab_meta_insert_partial);
+  RUN_TEST(test_vtab_meta_search_returns_cols);
+  RUN_TEST(test_vtab_meta_select_star);
+  RUN_TEST(test_vtab_meta_delete);
+  RUN_TEST(test_vtab_meta_reopen);
+  RUN_TEST(test_vtab_meta_drop);
 
   return UNITY_END();
 }

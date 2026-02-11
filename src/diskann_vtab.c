@@ -7,13 +7,16 @@
 ** Wraps the DiskANN C API as a SQLite virtual table.
 ** Supports CREATE, INSERT, SELECT (MATCH search), DELETE, DROP.
 **
-** Schema: CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN)
-** All columns HIDDEN. rowid via xRowid. MATCH on vector col for ANN search.
+** Schema: CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN, meta1 TYPE,
+*...)
+** First 3 columns HIDDEN. Metadata columns visible in SELECT *.
+** rowid via xRowid. MATCH on vector col for ANN search.
 **
 ** Usage:
-**   CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean);
-**   INSERT INTO t(rowid, vector) VALUES (1, X'...');
-**   SELECT rowid, distance FROM t WHERE vector MATCH ?query AND k = 10;
+**   CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean, cat
+*TEXT);
+**   INSERT INTO t(rowid, vector, cat) VALUES (1, X'...', 'landscape');
+**   SELECT rowid, distance, cat FROM t WHERE vector MATCH ?query AND k = 10;
 **   DELETE FROM t WHERE rowid = 1;
 **   DROP TABLE t;
 */
@@ -26,6 +29,7 @@
 #include "diskann.h"
 #include "diskann_internal.h"
 #include "diskann_sqlite.h"
+#include "diskann_util.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +50,13 @@ SQLITE_EXTENSION_INIT1
 #define DISKANN_COL_VECTOR 0
 #define DISKANN_COL_DISTANCE 1
 #define DISKANN_COL_K 2
+#define DISKANN_COL_META_START 3 /* First metadata column index */
+
+/* Metadata column definition (parsed from CREATE VIRTUAL TABLE args) */
+typedef struct DiskAnnMetaCol {
+  char *name; /* sqlite3_mprintf'd, owned */
+  char *type; /* sqlite3_mprintf'd, owned */
+} DiskAnnMetaCol;
 
 /* Virtual table structure */
 typedef struct diskann_vtab {
@@ -55,14 +66,20 @@ typedef struct diskann_vtab {
   char *table_name;
   DiskAnnIndex *idx;   /* Opened index (kept open for performance) */
   uint32_t dimensions; /* Cached from idx for dim validation in xUpdate */
+  int n_meta_cols;     /* 0 for vtabs without metadata columns */
+  DiskAnnMetaCol
+      *meta_cols; /* sqlite3_malloc'd array, NULL if n_meta_cols==0 */
 } diskann_vtab;
 
 /* Cursor structure for iteration */
 typedef struct diskann_cursor {
   sqlite3_vtab_cursor base;
-  DiskAnnResult *results; /* Search results (sqlite3_malloc'd) */
-  int num_results;        /* Actual count from diskann_search() */
-  int current;            /* Current position (0-based) */
+  DiskAnnResult *results;    /* Search results (sqlite3_malloc'd) */
+  int num_results;           /* Actual count from diskann_search() */
+  int current;               /* Current position (0-based) */
+  sqlite3_stmt *meta_stmt;   /* Cached SELECT from _attrs, or NULL */
+  int64_t meta_cached_rowid; /* Rowid of last fetched metadata row */
+  int meta_has_row;          /* 1 if meta_stmt stepped to SQLITE_ROW */
 } diskann_cursor;
 
 /* Forward declarations */
@@ -102,15 +119,152 @@ static int parse_metric(const char *str) {
 }
 
 /*
+** Free a DiskAnnMetaCol array and all owned strings.
+*/
+static void free_meta_cols(DiskAnnMetaCol *cols, int n) {
+  if (!cols)
+    return;
+  for (int i = 0; i < n; i++) {
+    sqlite3_free(cols[i].name);
+    sqlite3_free(cols[i].type);
+  }
+  sqlite3_free(cols);
+}
+
+/*
+** Check if a column name is reserved (case-insensitive).
+*/
+static int is_reserved_column_name(const char *name) {
+  return sqlite3_stricmp(name, "vector") == 0 ||
+         sqlite3_stricmp(name, "distance") == 0 ||
+         sqlite3_stricmp(name, "k") == 0 || sqlite3_stricmp(name, "rowid") == 0;
+}
+
+/*
+** Check if a metadata column type is valid (case-insensitive).
+*/
+static int is_valid_meta_type(const char *type) {
+  return sqlite3_stricmp(type, "TEXT") == 0 ||
+         sqlite3_stricmp(type, "INTEGER") == 0 ||
+         sqlite3_stricmp(type, "REAL") == 0 ||
+         sqlite3_stricmp(type, "BLOB") == 0;
+}
+
+/*
+** Parse metadata column definitions from argv.
+** Non-key=value entries are treated as "name TYPE" column definitions.
+** Validates names, types, rejects duplicates and reserved names.
+** On success, *out_cols and *out_n are set (caller owns *out_cols).
+** On failure, *pzErr is set and SQLITE_ERROR returned.
+*/
+static int parse_meta_columns(const char *const *argv, int argc,
+                              DiskAnnMetaCol **out_cols, int *out_n,
+                              char **pzErr) {
+  /* First pass: count non-key=value entries */
+  int n = 0;
+  for (int i = 3; i < argc; i++) {
+    if (!strchr(argv[i], '='))
+      n++;
+  }
+  if (n == 0) {
+    *out_cols = NULL;
+    *out_n = 0;
+    return SQLITE_OK;
+  }
+
+  DiskAnnMetaCol *cols = sqlite3_malloc(n * (int)sizeof(DiskAnnMetaCol));
+  if (!cols)
+    return SQLITE_NOMEM;
+  memset(cols, 0, (size_t)n * sizeof(DiskAnnMetaCol));
+
+  int idx = 0;
+  for (int i = 3; i < argc; i++) {
+    if (strchr(argv[i], '='))
+      continue;
+
+    /* Parse "name TYPE" */
+    char name_buf[MAX_IDENTIFIER_LEN + 1];
+    char type_buf[16];
+    if (sscanf(argv[i], "%64s %15s", name_buf, type_buf) != 2) {
+      *pzErr =
+          sqlite3_mprintf("diskann: invalid column definition '%s'", argv[i]);
+      free_meta_cols(cols, idx);
+      return SQLITE_ERROR;
+    }
+
+    /* Validate name */
+    if (!validate_identifier(name_buf)) {
+      *pzErr = sqlite3_mprintf("diskann: invalid column name '%s'", name_buf);
+      free_meta_cols(cols, idx);
+      return SQLITE_ERROR;
+    }
+    if (is_reserved_column_name(name_buf)) {
+      *pzErr = sqlite3_mprintf("diskann: reserved column name '%s'", name_buf);
+      free_meta_cols(cols, idx);
+      return SQLITE_ERROR;
+    }
+
+    /* Check for duplicate column names */
+    for (int j = 0; j < idx; j++) {
+      if (sqlite3_stricmp(cols[j].name, name_buf) == 0) {
+        *pzErr =
+            sqlite3_mprintf("diskann: duplicate column name '%s'", name_buf);
+        free_meta_cols(cols, idx);
+        return SQLITE_ERROR;
+      }
+    }
+
+    /* Validate type */
+    if (!is_valid_meta_type(type_buf)) {
+      *pzErr = sqlite3_mprintf("diskann: invalid column type '%s' for '%s' "
+                               "(must be TEXT, INTEGER, REAL, or BLOB)",
+                               type_buf, name_buf);
+      free_meta_cols(cols, idx);
+      return SQLITE_ERROR;
+    }
+
+    cols[idx].name = sqlite3_mprintf("%s", name_buf);
+    cols[idx].type = sqlite3_mprintf("%s", type_buf);
+    if (!cols[idx].name || !cols[idx].type) {
+      free_meta_cols(cols, idx + 1);
+      return SQLITE_NOMEM;
+    }
+    idx++;
+  }
+
+  *out_cols = cols;
+  *out_n = idx;
+  return SQLITE_OK;
+}
+
+/*
 ** Shared init helper for xCreate and xConnect.
-** Declares the vtab schema, allocates the vtab struct, populates fields.
+** Declares the vtab schema (with optional metadata columns),
+** allocates the vtab struct, populates fields.
+** Takes ownership of meta_cols on success; caller must free on failure.
 */
 static int vtab_init(sqlite3 *db, const char *db_name, const char *table_name,
-                     DiskAnnIndex *idx, sqlite3_vtab **ppVtab, char **pzErr) {
+                     DiskAnnIndex *idx, DiskAnnMetaCol *meta_cols,
+                     int n_meta_cols, sqlite3_vtab **ppVtab, char **pzErr) {
   int rc;
 
-  rc = sqlite3_declare_vtab(
-      db, "CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN)");
+  /* Build dynamic declare_vtab schema string */
+  sqlite3_str *s = sqlite3_str_new(db);
+  sqlite3_str_appendall(
+      s, "CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN");
+  for (int i = 0; i < n_meta_cols; i++) {
+    sqlite3_str_appendf(s, ", \"%w\" %s", meta_cols[i].name, meta_cols[i].type);
+  }
+  sqlite3_str_appendall(s, ")");
+
+  char *schema = sqlite3_str_finish(s);
+  if (!schema) {
+    *pzErr = sqlite3_mprintf("diskann: out of memory building schema");
+    return SQLITE_NOMEM;
+  }
+
+  rc = sqlite3_declare_vtab(db, schema);
+  sqlite3_free(schema);
   if (rc != SQLITE_OK) {
     *pzErr = sqlite3_mprintf("diskann: declare_vtab failed");
     return rc;
@@ -127,10 +281,14 @@ static int vtab_init(sqlite3 *db, const char *db_name, const char *table_name,
   pVtab->table_name = sqlite3_mprintf("%s", table_name);
   pVtab->idx = idx;
   pVtab->dimensions = idx->dimensions;
+  pVtab->n_meta_cols = n_meta_cols;
+  pVtab->meta_cols = meta_cols; /* Takes ownership */
 
   if (!pVtab->db_name || !pVtab->table_name) {
     sqlite3_free(pVtab->db_name);
     sqlite3_free(pVtab->table_name);
+    /* Don't free meta_cols here — caller still owns on failure */
+    pVtab->meta_cols = NULL;
     sqlite3_free(pVtab);
     return SQLITE_NOMEM;
   }
@@ -148,6 +306,8 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
                          char **pzErr) {
   DiskAnnConfig config;
   DiskAnnIndex *idx = NULL;
+  DiskAnnMetaCol *meta_cols = NULL;
+  int n_meta_cols = 0;
   int rc;
 
   (void)pAux;
@@ -168,7 +328,7 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
   const char *db_name = argv[1];
   const char *table_name = argv[2];
 
-  /* Parse CREATE VIRTUAL TABLE parameters */
+  /* Parse CREATE VIRTUAL TABLE key=value parameters */
   for (int i = 3; i < argc; i++) {
     const char *param = argv[i];
     char key[64], value[64];
@@ -197,23 +357,109 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
     return SQLITE_ERROR;
   }
 
+  /* Parse metadata column definitions (non-key=value entries) */
+  rc = parse_meta_columns(argv, argc, &meta_cols, &n_meta_cols, pzErr);
+  if (rc != SQLITE_OK)
+    return rc;
+
   /* Create index (shadow tables + metadata) */
   rc = diskann_create_index(db, db_name, table_name, &config);
   if (rc != DISKANN_OK && rc != DISKANN_ERROR_EXISTS) {
     *pzErr = sqlite3_mprintf("diskann: failed to create index (rc=%d)", rc);
+    free_meta_cols(meta_cols, n_meta_cols);
     return SQLITE_ERROR;
+  }
+
+  /* Create Phase 2 shadow tables if we have metadata columns */
+  if (n_meta_cols > 0) {
+    char *sql = NULL;
+    char *err_msg = NULL;
+
+    /* Create _columns table: persists column definitions for xConnect */
+    sql = sqlite3_mprintf("CREATE TABLE \"%w\".\"%w_columns\" ("
+                          "name TEXT NOT NULL, type TEXT NOT NULL)",
+                          db_name, table_name);
+    if (!sql) {
+      free_meta_cols(meta_cols, n_meta_cols);
+      diskann_drop_index(db, db_name, table_name);
+      return SQLITE_NOMEM;
+    }
+    rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
+    sqlite3_free(sql);
+    if (rc != SQLITE_OK) {
+      *pzErr = sqlite3_mprintf("diskann: failed to create _columns table: %s",
+                               err_msg ? err_msg : "unknown error");
+      if (err_msg)
+        sqlite3_free(err_msg);
+      free_meta_cols(meta_cols, n_meta_cols);
+      diskann_drop_index(db, db_name, table_name);
+      return SQLITE_ERROR;
+    }
+
+    /* Insert column definitions into _columns */
+    for (int i = 0; i < n_meta_cols; i++) {
+      sql = sqlite3_mprintf(
+          "INSERT INTO \"%w\".\"%w_columns\"(name, type) VALUES ('%q', '%q')",
+          db_name, table_name, meta_cols[i].name, meta_cols[i].type);
+      if (!sql) {
+        free_meta_cols(meta_cols, n_meta_cols);
+        diskann_drop_index(db, db_name, table_name);
+        return SQLITE_NOMEM;
+      }
+      rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
+      sqlite3_free(sql);
+      if (rc != SQLITE_OK) {
+        if (err_msg)
+          sqlite3_free(err_msg);
+        free_meta_cols(meta_cols, n_meta_cols);
+        diskann_drop_index(db, db_name, table_name);
+        return SQLITE_ERROR;
+      }
+    }
+
+    /* Create _attrs table with dynamic schema */
+    sqlite3_str *s = sqlite3_str_new(db);
+    sqlite3_str_appendf(
+        s, "CREATE TABLE \"%w\".\"%w_attrs\"(rowid INTEGER PRIMARY KEY",
+        db_name, table_name);
+    for (int i = 0; i < n_meta_cols; i++) {
+      sqlite3_str_appendf(s, ", \"%w\" %s", meta_cols[i].name,
+                          meta_cols[i].type);
+    }
+    sqlite3_str_appendall(s, ")");
+    sql = sqlite3_str_finish(s);
+    if (!sql) {
+      free_meta_cols(meta_cols, n_meta_cols);
+      diskann_drop_index(db, db_name, table_name);
+      return SQLITE_NOMEM;
+    }
+    rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
+    sqlite3_free(sql);
+    if (rc != SQLITE_OK) {
+      *pzErr = sqlite3_mprintf("diskann: failed to create _attrs table: %s",
+                               err_msg ? err_msg : "unknown error");
+      if (err_msg)
+        sqlite3_free(err_msg);
+      free_meta_cols(meta_cols, n_meta_cols);
+      diskann_drop_index(db, db_name, table_name);
+      return SQLITE_ERROR;
+    }
   }
 
   /* Open the index */
   rc = diskann_open_index(db, db_name, table_name, &idx);
   if (rc != DISKANN_OK) {
     *pzErr = sqlite3_mprintf("diskann: failed to open index (rc=%d)", rc);
+    free_meta_cols(meta_cols, n_meta_cols);
+    diskann_drop_index(db, db_name, table_name);
     return SQLITE_ERROR;
   }
 
-  rc = vtab_init(db, db_name, table_name, idx, ppVtab, pzErr);
+  rc = vtab_init(db, db_name, table_name, idx, meta_cols, n_meta_cols, ppVtab,
+                 pzErr);
   if (rc != SQLITE_OK) {
     diskann_close_index(idx);
+    free_meta_cols(meta_cols, n_meta_cols);
     return rc;
   }
 
@@ -228,6 +474,8 @@ static int diskannConnect(sqlite3 *db, void *pAux, int argc,
                           const char *const *argv, sqlite3_vtab **ppVtab,
                           char **pzErr) {
   DiskAnnIndex *idx = NULL;
+  DiskAnnMetaCol *meta_cols = NULL;
+  int n_meta_cols = 0;
   int rc;
 
   (void)pAux;
@@ -248,9 +496,62 @@ static int diskannConnect(sqlite3 *db, void *pAux, int argc,
     return SQLITE_ERROR;
   }
 
-  rc = vtab_init(db, db_name, table_name, idx, ppVtab, pzErr);
+  /* Read metadata column definitions from _columns table (Phase 2).
+  ** If _columns doesn't exist (Phase 1 index), n_meta_cols stays 0. */
+  char *col_sql = sqlite3_mprintf(
+      "SELECT name, type FROM \"%w\".\"%w_columns\"", db_name, table_name);
+  if (!col_sql) {
+    diskann_close_index(idx);
+    return SQLITE_NOMEM;
+  }
+
+  sqlite3_stmt *col_stmt;
+  rc = sqlite3_prepare_v2(db, col_sql, -1, &col_stmt, NULL);
+  sqlite3_free(col_sql);
+
+  if (rc == SQLITE_OK) {
+    /* Count rows first */
+    int count = 0;
+    while (sqlite3_step(col_stmt) == SQLITE_ROW)
+      count++;
+    sqlite3_reset(col_stmt);
+
+    if (count > 0) {
+      meta_cols = sqlite3_malloc(count * (int)sizeof(DiskAnnMetaCol));
+      if (!meta_cols) {
+        sqlite3_finalize(col_stmt);
+        diskann_close_index(idx);
+        return SQLITE_NOMEM;
+      }
+      memset(meta_cols, 0, (size_t)count * sizeof(DiskAnnMetaCol));
+
+      int i = 0;
+      while (sqlite3_step(col_stmt) == SQLITE_ROW && i < count) {
+        const char *name = (const char *)sqlite3_column_text(col_stmt, 0);
+        const char *type = (const char *)sqlite3_column_text(col_stmt, 1);
+        meta_cols[i].name = sqlite3_mprintf("%s", name);
+        meta_cols[i].type = sqlite3_mprintf("%s", type);
+        if (!meta_cols[i].name || !meta_cols[i].type) {
+          free_meta_cols(meta_cols, i + 1);
+          sqlite3_finalize(col_stmt);
+          diskann_close_index(idx);
+          return SQLITE_NOMEM;
+        }
+        i++;
+      }
+      n_meta_cols = i;
+    }
+    sqlite3_finalize(col_stmt);
+  } else {
+    /* _columns table doesn't exist — Phase 1 index, no metadata cols */
+    n_meta_cols = 0;
+  }
+
+  rc = vtab_init(db, db_name, table_name, idx, meta_cols, n_meta_cols, ppVtab,
+                 pzErr);
   if (rc != SQLITE_OK) {
     diskann_close_index(idx);
+    free_meta_cols(meta_cols, n_meta_cols);
     return rc;
   }
 
@@ -263,6 +564,7 @@ static int diskannConnect(sqlite3 *db, void *pAux, int argc,
 static int diskannDisconnect(sqlite3_vtab *pVtab) {
   diskann_vtab *p = (diskann_vtab *)pVtab;
   diskann_close_index(p->idx);
+  free_meta_cols(p->meta_cols, p->n_meta_cols);
   sqlite3_free(p->db_name);
   sqlite3_free(p->table_name);
   sqlite3_free(p);
@@ -280,9 +582,10 @@ static int diskannDestroy(sqlite3_vtab *pVtab) {
   diskann_close_index(p->idx);
   p->idx = NULL;
 
-  /* Drop shadow tables */
+  /* Drop all shadow tables (including Phase 2 _attrs/_columns) */
   diskann_drop_index(p->db, p->db_name, p->table_name);
 
+  free_meta_cols(p->meta_cols, p->n_meta_cols);
   sqlite3_free(p->db_name);
   sqlite3_free(p->table_name);
   sqlite3_free(p);
@@ -388,6 +691,10 @@ static int diskannOpen(sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCursor) {
 */
 static int diskannClose(sqlite3_vtab_cursor *pCursor) {
   diskann_cursor *pCur = (diskann_cursor *)pCursor;
+  if (pCur->meta_stmt) {
+    sqlite3_finalize(pCur->meta_stmt);
+    pCur->meta_stmt = NULL;
+  }
   sqlite3_free(pCur->results);
   sqlite3_free(pCur);
   return SQLITE_OK;
@@ -455,7 +762,7 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
     }
     pCur->num_results = rc; /* rc IS the count */
     pCur->current = 0;
-    return SQLITE_OK;
+    goto prepare_meta_stmt;
   }
 
   if (idxNum & DISKANN_IDX_ROWID) {
@@ -490,11 +797,44 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
     }
     sqlite3_finalize(stmt);
     pCur->current = 0;
-    return SQLITE_OK;
+    goto prepare_meta_stmt;
   }
 
   /* No MATCH, no ROWID → empty result set */
   pCur->num_results = 0;
+  return SQLITE_OK;
+
+prepare_meta_stmt:
+  /* Prepare metadata SELECT statement if vtab has metadata columns */
+  if (pCur->meta_stmt) {
+    sqlite3_finalize(pCur->meta_stmt);
+    pCur->meta_stmt = NULL;
+  }
+  pCur->meta_cached_rowid = -1;
+  pCur->meta_has_row = 0;
+
+  if (pVtab->n_meta_cols > 0 && pCur->num_results > 0) {
+    sqlite3_str *ms = sqlite3_str_new(pVtab->db);
+    sqlite3_str_appendall(ms, "SELECT ");
+    for (int mi = 0; mi < pVtab->n_meta_cols; mi++) {
+      if (mi > 0)
+        sqlite3_str_appendall(ms, ", ");
+      sqlite3_str_appendf(ms, "\"%w\"", pVtab->meta_cols[mi].name);
+    }
+    sqlite3_str_appendf(ms, " FROM \"%w\".\"%w_attrs\" WHERE rowid = ?",
+                        pVtab->db_name, pVtab->table_name);
+    char *meta_sql = sqlite3_str_finish(ms);
+    if (!meta_sql)
+      return SQLITE_NOMEM;
+
+    int mrc =
+        sqlite3_prepare_v2(pVtab->db, meta_sql, -1, &pCur->meta_stmt, NULL);
+    sqlite3_free(meta_sql);
+    if (mrc != SQLITE_OK) {
+      pCur->meta_stmt = NULL;
+      /* Non-fatal: metadata fetch will return NULLs */
+    }
+  }
   return SQLITE_OK;
 }
 
@@ -538,9 +878,32 @@ static int diskannColumn(sqlite3_vtab_cursor *pCursor, sqlite3_context *ctx,
   case DISKANN_COL_K:
     sqlite3_result_null(ctx);
     break;
-  default:
-    sqlite3_result_null(ctx);
+  default: {
+    /* Metadata column: col >= DISKANN_COL_META_START */
+    int meta_idx = i - DISKANN_COL_META_START;
+    diskann_vtab *pVtab = (diskann_vtab *)pCursor->pVtab;
+    if (meta_idx < 0 || meta_idx >= pVtab->n_meta_cols || !pCur->meta_stmt) {
+      sqlite3_result_null(ctx);
+      break;
+    }
+
+    /* Lazy fetch: only query _attrs when rowid changes */
+    int64_t current_rowid = pCur->results[pCur->current].id;
+    if (pCur->meta_cached_rowid != current_rowid) {
+      sqlite3_reset(pCur->meta_stmt);
+      sqlite3_bind_int64(pCur->meta_stmt, 1, current_rowid);
+      pCur->meta_has_row = (sqlite3_step(pCur->meta_stmt) == SQLITE_ROW);
+      pCur->meta_cached_rowid = current_rowid;
+    }
+
+    if (pCur->meta_has_row) {
+      sqlite3_result_value(ctx,
+                           sqlite3_column_value(pCur->meta_stmt, meta_idx));
+    } else {
+      sqlite3_result_null(ctx);
+    }
     break;
+  }
   }
 
   return SQLITE_OK;
@@ -563,7 +926,7 @@ static int diskannRowid(sqlite3_vtab_cursor *pCursor, sqlite_int64 *pRowid) {
 ** xUpdate — INSERT, DELETE handler.
 **
 ** INSERT: argv[0]=NULL, argv[1]=rowid, argv[2]=vector, argv[3]=distance(NULL),
-**         argv[4]=k(NULL). argc = 2 + nColumns = 5.
+**         argv[4]=k(NULL), argv[5+i]=metadata[i]. argc = 2 + 3 + n_meta_cols.
 ** DELETE: argv[0]=rowid. argc = 1.
 */
 static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
@@ -575,10 +938,27 @@ static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
     sqlite_int64 rowid = sqlite3_value_int64(argv[0]);
     int rc = diskann_delete(p->idx, rowid);
     /* NOTFOUND is not an error for DELETE — row may already be gone */
-    if (rc == DISKANN_OK || rc == DISKANN_ERROR_NOTFOUND)
-      return SQLITE_OK;
-    pVtab->zErrMsg = sqlite3_mprintf("diskann: delete failed (rc=%d)", rc);
-    return SQLITE_ERROR;
+    if (rc != DISKANN_OK && rc != DISKANN_ERROR_NOTFOUND) {
+      pVtab->zErrMsg = sqlite3_mprintf("diskann: delete failed (rc=%d)", rc);
+      return SQLITE_ERROR;
+    }
+
+    /* Delete metadata row from _attrs (if metadata columns exist) */
+    if (p->n_meta_cols > 0) {
+      char *sql =
+          sqlite3_mprintf("DELETE FROM \"%w\".\"%w_attrs\" WHERE rowid = ?",
+                          p->db_name, p->table_name);
+      if (sql) {
+        sqlite3_stmt *del_stmt;
+        if (sqlite3_prepare_v2(p->db, sql, -1, &del_stmt, NULL) == SQLITE_OK) {
+          sqlite3_bind_int64(del_stmt, 1, rowid);
+          sqlite3_step(del_stmt);
+          sqlite3_finalize(del_stmt);
+        }
+        sqlite3_free(sql);
+      }
+    }
+    return SQLITE_OK;
   }
 
   if (argc > 1 && sqlite3_value_type(argv[0]) == SQLITE_NULL) {
@@ -606,14 +986,57 @@ static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
       return SQLITE_ERROR;
     }
 
-    /* argv[3]=distance(NULL), argv[4]=k(NULL) — skip */
+    /* argv[3]=distance(NULL), argv[4]=k(NULL) — skip
+    ** argv[5+i] = metadata column i */
     int rc = diskann_insert(p->idx, rowid, vec, dims);
-    if (rc == DISKANN_OK) {
-      *pRowid = rowid;
-      return SQLITE_OK;
+    if (rc != DISKANN_OK) {
+      pVtab->zErrMsg = sqlite3_mprintf("diskann: insert failed (rc=%d)", rc);
+      return SQLITE_ERROR;
     }
-    pVtab->zErrMsg = sqlite3_mprintf("diskann: insert failed (rc=%d)", rc);
-    return SQLITE_ERROR;
+
+    /* Insert metadata row into _attrs (if metadata columns exist) */
+    if (p->n_meta_cols > 0) {
+      sqlite3_str *s = sqlite3_str_new(p->db);
+      sqlite3_str_appendf(s, "INSERT INTO \"%w\".\"%w_attrs\"(rowid",
+                          p->db_name, p->table_name);
+      for (int mi = 0; mi < p->n_meta_cols; mi++) {
+        sqlite3_str_appendf(s, ", \"%w\"", p->meta_cols[mi].name);
+      }
+      sqlite3_str_appendall(s, ") VALUES (?");
+      for (int mi = 0; mi < p->n_meta_cols; mi++) {
+        sqlite3_str_appendall(s, ", ?");
+      }
+      sqlite3_str_appendall(s, ")");
+      char *sql = sqlite3_str_finish(s);
+      if (!sql) {
+        return SQLITE_NOMEM;
+      }
+
+      sqlite3_stmt *ins_stmt;
+      rc = sqlite3_prepare_v2(p->db, sql, -1, &ins_stmt, NULL);
+      sqlite3_free(sql);
+      if (rc != SQLITE_OK) {
+        pVtab->zErrMsg =
+            sqlite3_mprintf("diskann: failed to prepare _attrs insert");
+        return SQLITE_ERROR;
+      }
+
+      sqlite3_bind_int64(ins_stmt, 1, rowid);
+      for (int mi = 0; mi < p->n_meta_cols; mi++) {
+        /* argv[5+mi] = metadata column mi (after rowid, vector, distance, k) */
+        sqlite3_bind_value(ins_stmt, 2 + mi, argv[5 + mi]);
+      }
+
+      rc = sqlite3_step(ins_stmt);
+      sqlite3_finalize(ins_stmt);
+      if (rc != SQLITE_DONE) {
+        pVtab->zErrMsg = sqlite3_mprintf("diskann: failed to insert metadata");
+        return SQLITE_ERROR;
+      }
+    }
+
+    *pRowid = rowid;
+    return SQLITE_OK;
   }
 
   /* UPDATE — not supported */
@@ -626,7 +1049,9 @@ static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
 */
 static int diskannShadowName(const char *zName) {
   return sqlite3_stricmp(zName, "shadow") == 0 ||
-         sqlite3_stricmp(zName, "metadata") == 0;
+         sqlite3_stricmp(zName, "metadata") == 0 ||
+         sqlite3_stricmp(zName, "attrs") == 0 ||
+         sqlite3_stricmp(zName, "columns") == 0;
 }
 
 /*

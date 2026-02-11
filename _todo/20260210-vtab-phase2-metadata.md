@@ -9,25 +9,37 @@ Add user-defined metadata columns (`category TEXT`, `score REAL`, etc.) to the v
 - [x] Research & Planning
 - [x] Test Design
 - [x] Implementation Design
-- [ ] Test-First Development
-- [ ] Implementation
-- [ ] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Test-First Development (14 tests written, all fail for right reasons)
+- [x] Implementation (all 159 tests pass, ASan + Valgrind clean)
+- [x] Integration (extension builds, smoke test passes with metadata)
+- [x] Cleanup & Documentation
+- [x] Final Review (159 tests pass, ASan + Valgrind clean, extension smoke test OK)
 
 ## Required Reading
 
-- Parent TPP: `20260210-virtual-table-with-filtering.md` — Tribal Knowledge
+- Parent TPP: `20260210-virtual-table-with-filtering.md` — Tribal Knowledge, argv layout
+- Phase 1 TPP: `20260210-vtab-phase1-basic-vtab.md` — Gotchas, SAVEPOINT behavior
 - `src/diskann_vtab.c` — After Phase 1 (working basic vtab)
 - `src/diskann_api.c` — `diskann_drop_index()` (needs extension for \_attrs/\_columns)
 - `src/diskann_util.h` — `validate_identifier()`
-- Blocked by: `20260210-vtab-phase1-basic-vtab.md`
+- Blocked by: `20260210-vtab-phase1-basic-vtab.md` (DONE)
 
 ## Description
 
 **Problem:** Phase 1 vtab only has vector/distance/k columns. Real-world use needs metadata (categories, timestamps, scores) that can be queried alongside vector search.
 
-**Success criteria:** 13 new tests pass. Can CREATE with metadata columns, INSERT with metadata, SELECT returns metadata, DELETE cleans up metadata, schema survives reopen, DROP cleans up all shadow tables.
+**Success criteria:** 14 new tests pass. Can CREATE with metadata columns, INSERT with metadata, SELECT returns metadata, DELETE cleans up metadata, schema survives reopen, DROP cleans up all shadow tables.
+
+## Tribal Knowledge
+
+- **Metadata SELECT: use named columns, not SELECT \*.** The TPP originally suggested `SELECT * FROM _attrs WHERE rowid=?` with a `+1` offset (because col 0 is rowid). Fragile. Instead: `SELECT "col1", "col2" FROM _attrs WHERE rowid=?` — column indices map directly to meta_cols array.
+- **Quote column names with `"%w"` in all dynamic SQL.** `validate_identifier()` accepts SQL keywords like `select`, `from`. These break unquoted. `"%w"` produces `"select"` which is safe.
+- **xFilter can be called multiple times per cursor.** Must finalize existing `meta_stmt` before creating a new one. Check and finalize in xFilter before prepare.
+- **Error recovery in xCreate.** If `diskann_create_index()` succeeds but `_attrs` CREATE fails, call `diskann_drop_index()` + `diskann_close_index()` to clean up orphaned shadow tables before returning error.
+- **INSERT failure atomicity is free.** If `diskann_insert()` succeeds but `_attrs INSERT` fails, returning SQLITE_ERROR from xUpdate lets SQLite's implicit statement transaction roll back ALL changes (shadow + attrs). No manual `diskann_delete()` needed.
+- **Backward compat in xConnect.** Phase 1 indexes have no `_columns` table. If `sqlite3_prepare_v2` for `SELECT ... FROM _columns` fails, set `n_meta_cols = 0` — don't return an error.
+- **Duplicate column names must be rejected.** SQLite allows duplicate column names in CREATE TABLE, producing a confusing `_attrs` table. Validate in `parse_meta_columns()`.
+- **ROWID=0x08 is taken.** Phase 1 used `DISKANN_IDX_ROWID = 0x08`. Phase 3's FILTER bit must use 0x10+.
 
 ## Implementation Design
 
@@ -95,18 +107,20 @@ Read `_columns` table to reconstruct `meta_cols[]` array. Build same dynamic dec
 Lazy fetch via prepared statement cached in cursor:
 
 ```c
-/* In cursor: sqlite3_stmt *meta_stmt; int64_t meta_cached_rowid; */
+/* In cursor: sqlite3_stmt *meta_stmt; int64_t meta_cached_rowid; int meta_has_row; */
 if (meta_cached_rowid != current_rowid) {
     sqlite3_reset(meta_stmt);
     sqlite3_bind_int64(meta_stmt, 1, current_rowid);
-    sqlite3_step(meta_stmt);
+    meta_has_row = (sqlite3_step(meta_stmt) == SQLITE_ROW);
     meta_cached_rowid = current_rowid;
 }
-/* Read column via sqlite3_column_value(meta_stmt, meta_idx + 1) */
-/* +1 because _attrs col 0 is rowid */
+/* Read via sqlite3_result_value(ctx, sqlite3_column_value(meta_stmt, meta_idx)) */
+/* No +1 offset — SELECT names columns explicitly, not SELECT * */
 ```
 
-Prepared statement created in xFilter (need table name), finalized in xClose.
+Prepared statement: `SELECT "col1", "col2" FROM _attrs WHERE rowid = ?`
+Created in xFilter (finalize old stmt first!), finalized in xClose.
+Use `sqlite3_result_value` + `sqlite3_column_value` for type-agnostic passthrough.
 
 ### xUpdate INSERT Changes
 
@@ -144,36 +158,36 @@ Add "attrs" and "columns" to the shadow name list.
 
 ## Test Design
 
-### Tests (13)
+### Tests (14)
 
-**CREATE with metadata (5):** 20. `test_vtab_meta_create` — `dimension=3, metric=euclidean, category TEXT, score REAL` succeeds. Verify `_attrs` and `_columns` tables exist. 21. `test_vtab_meta_create_all_types` — `a TEXT, b INTEGER, c REAL, d BLOB` all accepted. 22. `test_vtab_meta_create_invalid_type` — `a DATETIME` rejected. 23. `test_vtab_meta_create_invalid_name` — `123bad TEXT` rejected. 24. `test_vtab_meta_create_reserved_name` — `vector TEXT` rejected, also `distance`, `k`, `rowid`.
+**CREATE with metadata (6):** 20. `test_vtab_meta_create` — `dimension=3, metric=euclidean, category TEXT, score REAL` succeeds. Verify `_attrs` and `_columns` tables exist. 21. `test_vtab_meta_create_all_types` — `a TEXT, b INTEGER, c REAL, d BLOB` all accepted. 22. `test_vtab_meta_create_invalid_type` — `a DATETIME` rejected. 23. `test_vtab_meta_create_invalid_name` — `123bad TEXT` rejected. 24. `test_vtab_meta_create_reserved_name` — `vector TEXT` rejected, also `distance`, `k`, `rowid`. 33. `test_vtab_meta_create_duplicate_col` — `category TEXT, category TEXT` rejected.
 
-**INSERT with metadata (3):** 25. `test_vtab_meta_insert` — INSERT with all metadata. Verify via direct `SELECT` on `_attrs`. 26. `test_vtab_meta_insert_null` — INSERT without metadata columns → NULLs in `_attrs`. 27. `test_vtab_meta_insert_partial` — INSERT with some metadata → remaining are NULL.
+**INSERT with metadata (3):** 25. `test_vtab_meta_insert` — INSERT with all metadata via prepared stmt. Verify via direct `SELECT` on `_attrs`. 26. `test_vtab_meta_insert_null` — INSERT without metadata columns → NULLs in `_attrs`. 27. `test_vtab_meta_insert_partial` — INSERT specifying only `category` → `score` is NULL in `_attrs`.
 
-**SELECT returns metadata (2):** 28. `test_vtab_meta_search_returns_cols` — Search returns metadata for each result row. 29. `test_vtab_meta_select_star` — `SELECT *` returns metadata (not HIDDEN cols).
+**SELECT returns metadata (2):** 28. `test_vtab_meta_search_returns_cols` — MATCH search returns correct metadata per result row. 29. `test_vtab_meta_select_star` — `SELECT *` returns metadata (not HIDDEN cols).
 
-**DELETE (1):** 30. `test_vtab_meta_delete` — DELETE removes `_attrs` row too.
+**DELETE (1):** 30. `test_vtab_meta_delete` — DELETE removes `_attrs` row too. Verify via direct SELECT.
 
-**PERSISTENCE (1):** 31. `test_vtab_meta_reopen` — File-based db. Column defs survive close/reopen.
+**PERSISTENCE (1):** 31. `test_vtab_meta_reopen` — File-based db. Column defs + metadata survive close/reopen.
 
 **DROP (1):** 32. `test_vtab_meta_drop` — DROP removes `_attrs` and `_columns` shadow tables.
 
 ## Tasks
 
-- [ ] Write 13 failing tests
-- [ ] Add test declarations to test_runner.c
-- [ ] Implement argument parsing for column defs
-- [ ] Create `_columns` and `_attrs` shadow tables in xCreate
-- [ ] Implement dynamic declare_vtab
-- [ ] Implement xConnect schema reload from `_columns`
-- [ ] Implement xColumn metadata fetch with cursor cache
-- [ ] Implement xUpdate INSERT metadata insertion
-- [ ] Implement xUpdate DELETE metadata cleanup
-- [ ] Extend `diskann_drop_index()` for `_attrs`/`_columns`
-- [ ] Extend `diskannShadowName` for "attrs"/"columns"
-- [ ] All 32 tests pass (19 Phase 1 + 13 Phase 2)
-- [ ] `make asan` clean
-- [ ] `make clean && make valgrind` clean
+- [x] Write 14 failing tests
+- [x] Add test declarations to test_runner.c
+- [x] Implement argument parsing for column defs
+- [x] Create `_columns` and `_attrs` shadow tables in xCreate
+- [x] Implement dynamic declare_vtab
+- [x] Implement xConnect schema reload from `_columns`
+- [x] Implement xColumn metadata fetch with cursor cache
+- [x] Implement xUpdate INSERT metadata insertion
+- [x] Implement xUpdate DELETE metadata cleanup
+- [x] Extend `diskann_drop_index()` for `_attrs`/`_columns`
+- [x] Extend `diskannShadowName` for "attrs"/"columns"
+- [x] All 33 vtab tests pass (19 Phase 1 + 14 Phase 2)
+- [x] `make asan` clean
+- [x] `make clean && make valgrind` clean
 
 ## Notes
 

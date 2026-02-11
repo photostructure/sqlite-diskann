@@ -39,7 +39,8 @@ static int store_metadata_int(sqlite3 *db, const char *db_name,
                               int64_t value) {
   /* index_name validated by caller (all callers run validate_identifier) */
   char *sql = sqlite3_mprintf(
-      "INSERT OR REPLACE INTO \"%w\".%s_metadata (key, value) VALUES (?1, ?2)",
+      "INSERT OR REPLACE INTO \"%w\".\"%w_metadata\" (key, value) "
+      "VALUES (?1, ?2)",
       db_name, index_name);
   if (!sql)
     return DISKANN_ERROR_NOMEM;
@@ -66,7 +67,7 @@ static int store_metadata_int(sqlite3 *db, const char *db_name,
 static int shadow_table_exists(sqlite3 *db, const char *db_name,
                                const char *index_name) {
   char *sql = sqlite3_mprintf("SELECT name FROM \"%w\".sqlite_master "
-                              "WHERE type='table' AND name='%s_shadow'",
+                              "WHERE type='table' AND name='%q_shadow'",
                               db_name, index_name);
   if (!sql)
     return -1;
@@ -132,7 +133,7 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
 
   /* Create shadow table: {index_name}_shadow (id INTEGER PRIMARY KEY, data
    * BLOB) */
-  sql = sqlite3_mprintf("CREATE TABLE \"%w\".%s_shadow ("
+  sql = sqlite3_mprintf("CREATE TABLE \"%w\".\"%w_shadow\" ("
                         "  id INTEGER PRIMARY KEY,"
                         "  data BLOB NOT NULL"
                         ")",
@@ -153,7 +154,7 @@ int diskann_create_index(sqlite3 *db, const char *db_name,
   }
 
   /* Create metadata table: {index_name}_metadata (key TEXT, value INTEGER) */
-  sql = sqlite3_mprintf("CREATE TABLE \"%w\".%s_metadata ("
+  sql = sqlite3_mprintf("CREATE TABLE \"%w\".\"%w_metadata\" ("
                         "  key TEXT PRIMARY KEY,"
                         "  value INTEGER NOT NULL"
                         ")",
@@ -248,7 +249,7 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
 
   /* Check if shadow table exists */
   sql = sqlite3_mprintf("SELECT name FROM \"%w\".sqlite_master WHERE "
-                        "type='table' AND name='%s_shadow'",
+                        "type='table' AND name='%q_shadow'",
                         db_name, index_name);
 
   if (!sql) {
@@ -276,8 +277,8 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
   }
 
   /* Load metadata from metadata table */
-  sql = sqlite3_mprintf("SELECT key, value FROM \"%w\".%s_metadata", db_name,
-                        index_name);
+  sql = sqlite3_mprintf("SELECT key, value FROM \"%w\".\"%w_metadata\"",
+                        db_name, index_name);
 
   if (!sql) {
     rc = DISKANN_ERROR_NOMEM;
@@ -576,7 +577,7 @@ int diskann_drop_index(sqlite3 *db, const char *db_name,
   }
 
   /* Drop the shadow table */
-  sql = sqlite3_mprintf("DROP TABLE \"%w\".%s_shadow", db_name, index_name);
+  sql = sqlite3_mprintf("DROP TABLE \"%w\".\"%w_shadow\"", db_name, index_name);
 
   if (!sql) {
     return DISKANN_ERROR_NOMEM;
@@ -593,7 +594,7 @@ int diskann_drop_index(sqlite3 *db, const char *db_name,
   }
 
   /* Also drop the metadata table */
-  sql = sqlite3_mprintf("DROP TABLE IF EXISTS \"%w\".%s_metadata", db_name,
+  sql = sqlite3_mprintf("DROP TABLE IF EXISTS \"%w\".\"%w_metadata\"", db_name,
                         index_name);
 
   if (!sql) {
@@ -607,6 +608,33 @@ int diskann_drop_index(sqlite3 *db, const char *db_name,
     if (err_msg) {
       sqlite3_free(err_msg);
     }
+    return DISKANN_ERROR;
+  }
+
+  /* Drop Phase 2 shadow tables (IF EXISTS for backward compatibility) */
+  sql = sqlite3_mprintf("DROP TABLE IF EXISTS \"%w\".\"%w_attrs\"", db_name,
+                        index_name);
+  if (!sql)
+    return DISKANN_ERROR_NOMEM;
+
+  rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
+  sqlite3_free(sql);
+  if (rc != SQLITE_OK) {
+    if (err_msg)
+      sqlite3_free(err_msg);
+    return DISKANN_ERROR;
+  }
+
+  sql = sqlite3_mprintf("DROP TABLE IF EXISTS \"%w\".\"%w_columns\"", db_name,
+                        index_name);
+  if (!sql)
+    return DISKANN_ERROR_NOMEM;
+
+  rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
+  sqlite3_free(sql);
+  if (rc != SQLITE_OK) {
+    if (err_msg)
+      sqlite3_free(err_msg);
     return DISKANN_ERROR;
   }
 
@@ -637,7 +665,8 @@ int diskann_clear_index(sqlite3 *db, const char *db_name,
   }
 
   /* Delete all rows from shadow table */
-  sql = sqlite3_mprintf("DELETE FROM \"%w\".%s_shadow", db_name, index_name);
+  sql =
+      sqlite3_mprintf("DELETE FROM \"%w\".\"%w_shadow\"", db_name, index_name);
 
   if (!sql) {
     return DISKANN_ERROR_NOMEM;

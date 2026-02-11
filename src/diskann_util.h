@@ -7,6 +7,8 @@
 #ifndef DISKANN_UTIL_H
 #define DISKANN_UTIL_H
 
+#include <stddef.h>
+
 #define MAX_IDENTIFIER_LEN 64
 
 /*
