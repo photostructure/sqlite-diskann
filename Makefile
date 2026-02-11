@@ -49,6 +49,29 @@ endif
 # Default target
 all: $(BUILD_DIR)/$(EXTENSION)
 
+# Check if test binary is instrumented (ASan/UBSan)
+# Returns 0 if instrumented, 1 if clean
+.PHONY: check-instrumented
+check-instrumented:
+	@if [ -f "$(BUILD_DIR)/$(TEST_BIN)" ]; then \
+		if nm "$(BUILD_DIR)/$(TEST_BIN)" 2>/dev/null | grep -q '__asan\|__ubsan\|__tsan'; then \
+			exit 0; \
+		else \
+			exit 1; \
+		fi; \
+	else \
+		exit 1; \
+	fi
+
+# Release build (ensures clean, non-instrumented build)
+# Only cleans if instrumented build detected - preserves incremental builds
+release:
+	@if $(MAKE) -s check-instrumented 2>/dev/null; then \
+		echo "Instrumented build detected - cleaning..."; \
+		$(MAKE) clean; \
+	fi
+	@$(MAKE) EXTRA_CFLAGS="" all
+
 # Build extension (without sqlite3.o - symbols resolved from host at runtime)
 $(BUILD_DIR)/$(EXTENSION): $(SOURCES) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -DDISKANN_EXTENSION $(LDFLAGS) -o $@ $^ $(LIBS)
@@ -139,6 +162,7 @@ valgrind: $(BUILD_DIR)/$(TEST_BIN)
 help:
 	@echo "sqlite-diskann build targets:"
 	@echo "  all          Build extension (default)"
+	@echo "  release      Ensure clean build (auto-detects and cleans ASan/UBSan builds)"
 	@echo "  test         Build and run native C tests (alias for test-native)"
 	@echo "  test-native  Build and run native C tests only"
 	@echo "  test-all     Build and run both native C and TypeScript tests"
