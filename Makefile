@@ -133,10 +133,13 @@ bear:
 	@# Strip .o linker inputs that Bear captures (clang-tidy only compiles)
 	@python3 -c "import json;cc=json.load(open('compile_commands.json'));[e.__setitem__('arguments',[a for a in e['arguments'] if not a.endswith('.o')]) for e in cc];json.dump(cc,open('compile_commands.json','w'),indent=2)"
 
-# Run clang-tidy (requires compile_commands.json from bear)
+# Run clang-tidy (auto-generates compile_commands.json if missing)
 clang-tidy:
 	@command -v clang-tidy >/dev/null 2>&1 || { echo "Error: clang-tidy not installed" >&2; exit 1; }
-	@test -f compile_commands.json || { echo "Error: compile_commands.json not found. Run 'make bear' first" >&2; exit 1; }
+	@if [ ! -f compile_commands.json ]; then \
+		echo "compile_commands.json not found, generating with bear..."; \
+		$(MAKE) bear; \
+	fi
 	clang-tidy $(SOURCES) $(TEST_C_SOURCES)
 
 # Alias lint to clang-tidy for consistency with package.json
@@ -171,6 +174,6 @@ help:
 	@echo "  asan         Build and run with AddressSanitizer (fast memory checks)"
 	@echo "  valgrind     Build and run with Valgrind (thorough memory checks)"
 	@echo "  bear         Generate compile_commands.json for clang-tidy"
-	@echo "  clang-tidy   Run static analysis (requires 'make bear' first)"
+	@echo "  clang-tidy   Run static analysis (auto-generates compile_commands.json if needed)"
 	@echo "  clean        Remove build artifacts"
 	@echo "  help         Show this help"

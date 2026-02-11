@@ -2,6 +2,14 @@
 # Clang-tidy configuration for sqlite-diskann
 # Focus on C best practices, memory safety, and SQLite extension patterns
 
+# ============================================================================
+# CHECKS: What to enable and suppress
+# ============================================================================
+# - Start with nothing: -*
+# - Enable category: bugprone-*
+# - Suppress specific: -bugprone-easily-swappable-parameters
+# - NO inline comments in the Checks string (they break clang-tidy parsing!)
+#
 Checks: '
   -*,
   bugprone-*,
@@ -9,6 +17,7 @@ Checks: '
   -bugprone-misplaced-widening-cast,
   -bugprone-multi-level-implicit-pointer-conversion,
   cert-*,
+  -cert-err33-c,
   -cert-err58-cpp,
   -cert-msc30-c,
   -cert-msc32-c,
@@ -16,8 +25,10 @@ Checks: '
   -cert-msc51-cpp,
   clang-analyzer-*,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-deadcode.DeadStores,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
   -cppcoreguidelines-init-variables,
   -cppcoreguidelines-macro-to-enum,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
@@ -26,6 +37,7 @@ Checks: '
   misc-*,
   -misc-include-cleaner,
   performance-*,
+  -performance-no-int-to-ptr,
   readability-*,
   -readability-braces-around-statements,
   -readability-else-after-return,
@@ -34,9 +46,51 @@ Checks: '
   -readability-isolate-declaration,
   -readability-magic-numbers,
   -readability-uppercase-literal-suffix,
-  -performance-no-int-to-ptr,
-  -clang-analyzer-deadcode.DeadStores
 '
+
+# ============================================================================
+# SUPPRESSION RATIONALE
+# ============================================================================
+#
+# Bug Detection:
+#   -bugprone-easily-swappable-parameters      → SQLite APIs have many similar params
+#   -bugprone-misplaced-widening-cast          → False positives in distance calcs
+#   -bugprone-multi-level-implicit-pointer-conversion → SQLite void* patterns
+#
+# CERT Security:
+#   -cert-err33-c         → SQLite APIs intentionally ignore returns (sqlite3_finalize)
+#   -cert-msc30-c/32-c    → rand() in tests is acceptable
+#   -cert-*-cpp           → C++ only checks
+#
+# Static Analysis:
+#   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling → We validate manually
+#   -clang-analyzer-deadcode.DeadStores → False positives with cleanup patterns
+#
+# C++ Core Guidelines (adapted for C):
+#   -cppcoreguidelines-avoid-magic-numbers → Test constants are fine
+#   -cppcoreguidelines-avoid-non-const-global-variables → SQLite extensions need module state
+#   -cppcoreguidelines-init-variables → Defensive init is selective
+#   -cppcoreguidelines-macro-to-enum → SQLite macros intentional
+#   -cppcoreguidelines-pro-bounds-pointer-arithmetic → Required for vector math/traversal
+#   -cppcoreguidelines-pro-type-reinterpret-cast → BLOB serialization needs it
+#   -cppcoreguidelines-pro-type-union-access → SQLite sqlite3_value union
+#
+# Misc:
+#   -misc-include-cleaner → Too aggressive with vendored SQLite
+#
+# Performance:
+#   -performance-no-int-to-ptr → SQLite ROWID casting patterns
+#
+# Readability:
+#   -readability-braces-around-statements → Single-line if/for allowed
+#   -readability-else-after-return → Explicit control flow preferred
+#   -readability-function-cognitive-complexity → Some algorithms inherently complex
+#   -readability-identifier-length → Short names (i, j, k, rc, db) are idiomatic
+#   -readability-isolate-declaration → Multiple declarations allowed
+#   -readability-magic-numbers → Duplicates avoid-magic-numbers
+#   -readability-uppercase-literal-suffix → 1.0f clearer than 1.0F
+#
+# ============================================================================
 
 # Treat warnings as errors
 WarningsAsErrors: ''
@@ -47,23 +101,77 @@ HeaderFilterRegex: '^src/.*\.h$'
 # Format style
 FormatStyle: file
 
-# Check options — naming conventions match SQLite's CamelCase for types
+# ============================================================================
+# Naming Conventions
+# ============================================================================
+# Base rule: snake_case for code we write
+# Exceptions: SQLite's Hungarian notation and vtab callback patterns
+#
+# SQLite Hungarian Notation Guide:
+#   p*    = pointer (pVtab, ppCursor, pzErr)
+#   z*    = zero-terminated string (zName, zSql)
+#   i*    = integer (iCol, idxNum, idxStr)
+#   n*    = count/size (nConstraint, nOrderBy, nArg)
+#   a*    = array (aConstraint, aOrderBy, argv)
+#   x*    = method/callback (xCreate, xFilter, xBestIndex)
+#
 CheckOptions:
+  # --------------------------------------------------------------------------
+  # Functions: snake_case for our code, camelCase for SQLite callbacks
+  # --------------------------------------------------------------------------
   - key: readability-identifier-naming.FunctionCase
     value: lower_case
+  - key: readability-identifier-naming.FunctionIgnoredRegexp
+    value: '^(diskann[A-Z][a-zA-Z0-9]*|sqlite3_[a-z0-9_]+|x[A-Z][a-zA-Z]*)$'
+    # Matches: diskannCreate, diskannBestIndex, sqlite3_malloc, xCreate, xFilter
+
+  # --------------------------------------------------------------------------
+  # Variables: snake_case for our code, Hungarian for SQLite interop
+  # --------------------------------------------------------------------------
   - key: readability-identifier-naming.VariableCase
     value: lower_case
+  - key: readability-identifier-naming.VariableIgnoredRegexp
+    value: '^([pzian][A-Z][a-zA-Z0-9]*|idx[A-Z][a-zA-Z0-9]*|x[A-Z][a-zA-Z]*|diskannModule)$'
+    # Matches: pVtab, zName, iCol, nConstraint, aConstraint, idxNum, xFilter, diskannModule
+    # Hungarian notation + SQLite module name
+
+  # --------------------------------------------------------------------------
+  # Parameters: snake_case for our code, Hungarian for SQLite API params
+  # --------------------------------------------------------------------------
   - key: readability-identifier-naming.ParameterCase
     value: lower_case
+  - key: readability-identifier-naming.ParameterIgnoredRegexp
+    value: '^([pzian]{1,2}[A-Z][a-zA-Z0-9]*|idx[A-Z][a-zA-Z0-9]*|pApi|argc|argv)$'
+    # Matches: pVtab, ppCursor, pzErr, zName, iCol, nConstraint, aOrderBy, idxNum, pApi
+    # Note: {1,2} allows both pVar and ppVar (pointer to pointer)
+
+  # --------------------------------------------------------------------------
+  # Constants and Macros: SCREAMING_SNAKE_CASE
+  # --------------------------------------------------------------------------
   - key: readability-identifier-naming.ConstantCase
     value: UPPER_CASE
   - key: readability-identifier-naming.MacroDefinitionCase
     value: UPPER_CASE
-  - key: readability-identifier-naming.StructCase
-    value: CamelCase
-  - key: readability-identifier-naming.TypedefCase
-    value: CamelCase
   - key: readability-identifier-naming.GlobalConstantCase
     value: UPPER_CASE
+
+  # --------------------------------------------------------------------------
+  # Types: CamelCase (our convention), snake_case for SQLite interop
+  # --------------------------------------------------------------------------
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructIgnoredRegexp
+    value: '^(diskann_[a-z_]+|sqlite3_[a-z_]+)$'
+    # Matches: diskann_vtab, diskann_cursor, sqlite3_vtab, sqlite3_index_info
+
+  - key: readability-identifier-naming.TypedefCase
+    value: CamelCase
+  - key: readability-identifier-naming.TypedefIgnoredRegexp
+    value: '^(diskann_[a-z_]+|sqlite3_[a-z_]+)$'
+    # Matches: diskann_vtab, sqlite3_module, etc.
+
+  # --------------------------------------------------------------------------
+  # Performance tweaks
+  # --------------------------------------------------------------------------
   - key: performance-move-const-arg.CheckTriviallyCopyableMove
     value: false
