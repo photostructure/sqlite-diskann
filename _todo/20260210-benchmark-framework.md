@@ -12,8 +12,8 @@ Created comprehensive benchmark framework comparing sqlite-diskann (DiskANN appr
 - [x] Test-First Development
 - [x] Implementation
 - [x] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [ ] Cleanup & Documentation (update TPP to remove outdated blocker info)
+- [ ] Final Review (after running benchmarks)
 
 ## Required Reading
 
@@ -40,7 +40,8 @@ Created comprehensive benchmark framework comparing sqlite-diskann (DiskANN appr
 - ✅ Demonstrates comparative results with recall@k metrics
 - ✅ Includes quick (<2min), standard (10-15min), recall-sweep profiles
 - ✅ Results exportable to JSON
-- ⚠️ DiskANN benchmarks blocked by extension loading (see blockers)
+- ✅ Extension loading resolved (diskann_sqlite.h approach)
+- ⏳ DiskANN benchmarks need testing (extension loads, need to verify benchmarks run)
 
 ## Tribal Knowledge
 
@@ -64,31 +65,34 @@ Created comprehensive benchmark framework comparing sqlite-diskann (DiskANN appr
 - Recall@k metric: `|predicted ∩ ground_truth| / k`
 - All 4 datasets generated successfully (2.4 MB to 195 MB)
 
-### Critical Discovery: SQLite Extension Symbol Resolution
+### ~~Critical Discovery: SQLite Extension Symbol Resolution~~ RESOLVED ✅
 
-**The Problem:**
-DiskANN extension fails to load with ALL tested Node.js SQLite libraries:
+**The Problem (OUTDATED):**
+DiskANN extension was failing to load with `undefined symbol: sqlite3_bind_int64` error.
 
-- better-sqlite3: `undefined symbol: sqlite3_bind_int64`
-- @photostructure/sqlite: same error
-- node:sqlite (22.5+): same error
+**Root Cause Identified:**
+All DiskANN source files (`diskann_api.c`, `diskann_blob.c`, etc.) were calling SQLite functions directly without access to the `sqlite3_api` function pointer table required for extensions.
 
-**Root Cause:**
-All Node.js SQLite libraries statically link SQLite internally and don't export SQLite API symbols for dynamically loaded extensions. Our extension was built expecting to resolve symbols at runtime.
+**Solution Implemented (see `_done/20260210-extension-loading-fix.md`):**
 
-**Makefile currently uses:**
+Created `src/diskann_sqlite.h` that conditionally handles SQLite includes:
 
-```makefile
-LDFLAGS = -shared -Wl,--allow-shlib-undefined
+```c
+#ifdef DISKANN_EXTENSION
+  #include <sqlite3ext.h>
+  #ifdef DISKANN_VTAB_MAIN
+    SQLITE_EXTENSION_INIT1  // Only in diskann_vtab.c
+  #else
+    extern const sqlite3_api_routines *sqlite3_api;  // Other files
+  #endif
+#else
+  #include <sqlite3.h>  // Test builds
+#endif
 ```
 
-This allows undefined symbols but they still can't be resolved at runtime because the host process doesn't export them.
+All source files now include `diskann_sqlite.h` instead of `<sqlite3.h>` directly.
 
-### What We Tried
-
-1. ✅ **better-sqlite3** - Extension loads but symbols not found
-2. ✅ **@photostructure/sqlite** - Required `allowExtension: true` + `enableLoadExtension(true)` method call
-3. ✅ **node:sqlite** - Built-in to Node 22.5+, same symbol issue
+**Status:** ✅ Extension loads successfully in all tested Node.js SQLite libraries
 
 ### sqlite-vec API Quirks Discovered
 
@@ -154,33 +158,27 @@ Based on ann-benchmarks research:
 
 Trade-off: DiskANN sacrifices 1-5% recall for 10-200x speedup.
 
-## BLOCKER
+## ~~BLOCKER~~ RESOLVED ✅
 
-Cannot complete DiskANN benchmarks until extension loading is resolved.
+**Previous blocker (OUTDATED):** DiskANN extension symbol resolution with Node.js SQLite libraries
 
-**Blocker:** DiskANN extension symbol resolution with Node.js SQLite libraries
+**Resolution:** Extension loading issue was **SOLVED** via `src/diskann_sqlite.h` conditional header approach (see `_done/20260210-extension-loading-fix.md`). The extension now loads successfully without linking against system SQLite.
 
-**Options to unblock:**
+**How it was fixed:**
+- Created `diskann_sqlite.h` that conditionally includes `<sqlite3ext.h>` (extension builds) or `<sqlite3.h>` (test builds)
+- Only `diskann_vtab.c` has `SQLITE_EXTENSION_INIT1`, other files use `extern` declaration
+- All SQLite function calls route through `sqlite3_api` function pointers in extension builds
+- Extension builds with `-DDISKANN_EXTENSION` flag, tests build without it
 
-1. ✅ **System SQLite (RECOMMENDED)** - Link diskann against system libsqlite3:
-
-   ```bash
-   sudo apt-get install libsqlite3-dev
-   # Update Makefile: LIBS = -lm -lsqlite3
-   # Rebuild extension
-   ```
-
-2. **Static linking** - Build diskann with SQLite statically linked (duplicates code, not ideal)
-
-3. **Accept limitation** - Document that benchmarks only work for sqlite-vec, skip diskann
+**Current status:** Extension loads fine. Remaining work is testing/running the benchmarks.
 
 **Next session should:**
 
-1. Install libsqlite3-dev (requires sudo)
-2. Update Makefile to link against system SQLite
-3. Rebuild extension: `make clean && make`
-4. Run full benchmark: `npm run bench:quick`
-5. Validate recall@k calculations match expectations
+1. ~~Install libsqlite3-dev~~ ❌ NOT NEEDED
+2. ~~Update Makefile~~ ✅ ALREADY DONE
+3. Test DiskANN benchmarks actually run: `cd benchmarks && npm run bench:quick`
+4. Validate recall@k calculations match expectations
+5. Run full benchmark suite and document results
 
 ## Solutions
 
@@ -200,20 +198,9 @@ Cannot complete DiskANN benchmarks until extension loading is resolved.
 
 **Status:** ✅ Implemented and working
 
-### Option 2: System SQLite Linking (To Implement)
+### ~~Option 2: System SQLite Linking~~ NOT USED
 
-**Pros:**
-
-- Resolves symbol resolution issue
-- Standard approach for SQLite extensions
-- No duplicate SQLite code
-
-**Cons:**
-
-- Requires system package installation
-- Different SQLite version than Node libraries
-
-**Status:** Blocked - needs sudo access for apt-get
+**Status:** ❌ Not implemented - extension loading was solved via conditional header approach instead (see `_done/20260210-extension-loading-fix.md`)
 
 ## Tasks
 
@@ -282,10 +269,11 @@ Cannot complete DiskANN benchmarks until extension loading is resolved.
 
 ### Remaining Tasks
 
-- [ ] Install libsqlite3-dev (requires sudo)
-- [ ] Update Makefile to link against system SQLite
-- [ ] Rebuild diskann extension
-- [ ] Test full benchmark with both libraries
+- [x] ~~Install libsqlite3-dev~~ ❌ NOT NEEDED (extension loading solved differently)
+- [x] ~~Update Makefile~~ ✅ ALREADY DONE (diskann_sqlite.h approach)
+- [x] ~~Rebuild diskann extension~~ ✅ Extension builds and loads successfully
+- [ ] Update TPP to remove outdated blocker information (THIS TASK)
+- [ ] Test DiskANN benchmarks actually run with loaded extension
 - [ ] Validate recall@k metrics match expectations
 - [ ] Run performance comparison and document results
 - [ ] Optional: Add SIFT/GIST dataset support
@@ -293,24 +281,20 @@ Cannot complete DiskANN benchmarks until extension loading is resolved.
 **Verification:**
 
 ```bash
-# After blocker resolved:
-
-# 1. Check system SQLite available
-pkg-config --modversion sqlite3
-
-# 2. Rebuild extension
+# Extension loads successfully (already verified):
 cd /home/mrm/src/sqlite-diskann
-make clean && make
+make test  # ✅ 175 tests pass
+make       # ✅ Extension builds
 
-# 3. Run quick benchmark
+# Run benchmarks:
 cd benchmarks
 npm run bench:quick
 
 # Expected output:
-# - vec: ~2,250 QPS, 100% recall
+# - vec: ~2,250 QPS, 100% recall (already verified working)
 # - diskann: ~500+ QPS, 95-99% recall (10x speedup on small dataset)
 
-# 4. Run standard benchmark (if time permits)
+# Run standard benchmark (if time permits):
 npm run bench:standard
 ```
 
@@ -355,6 +339,39 @@ npm run bench:standard
 - Warmup: 10 queries before timing
 - Queries: 100 search operations
 
-**Framework is production-ready** - the only blocker is extension loading for diskann, which is a build/linking issue, not a framework issue.
+**Framework is production-ready** - extension loading has been resolved via `diskann_sqlite.h` conditional header approach.
 
-**Next engineer:** Start by resolving the blocker (install libsqlite3-dev, update Makefile, rebuild). Everything else is complete and tested.
+**Next session:**
+1. Update this TPP to remove outdated blocker info (DONE ✅)
+2. Test that DiskANN benchmarks actually run: `cd benchmarks && npm run bench:quick`
+3. Validate recall@k calculations
+4. Document performance results
+5. Mark TPP complete and move to `_done/`
+
+---
+
+## Session Update (2026-02-10)
+
+**TPP updated to reflect actual current state:**
+
+**What was wrong:**
+- TPP claimed extension loading was "blocked" and needed system SQLite linking
+- This analysis was written before `_done/20260210-extension-loading-fix.md` solved the issue
+- The "blocker" was already resolved via `diskann_sqlite.h` conditional header approach
+
+**What was fixed:**
+- ✅ Removed outdated blocker section about system SQLite
+- ✅ Updated tribal knowledge to note extension loading is SOLVED
+- ✅ Removed tasks about installing libsqlite3-dev (not needed)
+- ✅ Updated success criteria to reflect extension loads successfully
+- ✅ Clarified remaining work: test benchmarks, validate recall@k, document results
+
+**Actual remaining work:**
+1. ✅ Extension loading - SOLVED (diskann_sqlite.h)
+2. ⏳ Test DiskANN benchmarks - need to verify they run with loaded extension
+3. ⏳ Validate recall@k calculations match expectations
+4. ⏳ Run full benchmark suite (quick/standard/recall-sweep profiles)
+5. ⏳ Document performance comparison results
+6. ⏳ Final review and move to `_done/`
+
+**Key insight:** The framework itself is complete and tested (sqlite-vec benchmarks work). The only remaining work is running the DiskANN benchmarks now that extension loading is fixed, and documenting the results.
