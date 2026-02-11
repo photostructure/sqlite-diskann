@@ -9,7 +9,7 @@
   "githubPages": true,
   "exclude": ["**/*.test.ts", "**/*.spec.ts", "**/test/**"],
   "tsconfig": "tsconfig.json",
-  "projectDocuments": [],
+  "projectDocuments": ["USAGE.md"],
   "navigationLinks": {
     "GitHub": "https://github.com/photostructure/sqlite-diskann",
     "NPM": "https://www.npmjs.com/package/@photostructure/sqlite-diskann"
