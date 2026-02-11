@@ -1,0 +1,27 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "out": "build/docs",
+  "name": "@photostructure/sqlite-diskann",
+  "includeVersion": false,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "readme": "README.md",
+  "githubPages": true,
+  "exclude": ["**/*.test.ts", "**/*.spec.ts", "**/test/**"],
+  "tsconfig": "tsconfig.json",
+  "projectDocuments": [],
+  "navigationLinks": {
+    "GitHub": "https://github.com/photostructure/sqlite-diskann",
+    "NPM": "https://www.npmjs.com/package/@photostructure/sqlite-diskann"
+  },
+  "highlightLanguages": [
+    "typescript",
+    "javascript",
+    "c",
+    "sql",
+    "json",
+    "bash",
+    "shell",
+    "powershell"
+  ]
+}

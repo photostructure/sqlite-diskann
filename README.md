@@ -2,8 +2,11 @@
 
 [![npm version](https://img.shields.io/npm/v/@photostructure/sqlite-diskann.svg)](https://www.npmjs.com/package/@photostructure/sqlite-diskann)
 [![CI](https://github.com/photostructure/sqlite-diskann/workflows/CI/badge.svg)](https://github.com/photostructure/sqlite-diskann/actions/workflows/ci.yml)
+[![API Docs](https://img.shields.io/badge/API-Documentation-blue)](https://photostructure.github.io/sqlite-diskann/)
 
 SQLite extension for DiskANN approximate nearest neighbor vector search.
+
+📘 **[Full TypeScript API Documentation](https://photostructure.github.io/sqlite-diskann/)**
 
 ## What is this?
 
@@ -455,6 +458,21 @@ DiskANN stores the entire graph index inside SQLite using shadow tables, providi
 See [`_research/sqlite-vector-options.md`](./_research/sqlite-vector-options.md) for comparison with alternatives.
 
 ## API Reference
+
+### TypeScript API
+
+**📘 [Complete API Documentation](https://photostructure.github.io/sqlite-diskann/)** - Auto-generated from source with TypeDoc
+
+The TypeScript package exports the following functions:
+
+- **`loadDiskAnnExtension(db)`** - Load extension into database
+- **`getExtensionPath()`** - Get platform-specific extension path
+- **`createDiskAnnIndex(db, tableName, options)`** - Create virtual table with configuration
+- **`searchNearest(db, tableName, queryVector, k)`** - Search for k nearest neighbors
+- **`insertVector(db, tableName, rowid, vector)`** - Insert a vector
+- **`deleteVector(db, tableName, rowid)`** - Delete a vector
+
+See the [full API documentation](https://photostructure.github.io/sqlite-diskann/) for detailed usage, parameters, and examples.
 
 ### Virtual Table SQL
 
