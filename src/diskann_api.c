@@ -22,7 +22,7 @@
 #define DEFAULT_METRIC DISKANN_METRIC_EUCLIDEAN
 #define DEFAULT_MAX_NEIGHBORS 32
 #define DEFAULT_SEARCH_LIST_SIZE 100
-#define DEFAULT_INSERT_LIST_SIZE 200
+#define DEFAULT_INSERT_LIST_SIZE 100 /* Reduced from 200 for faster builds */
 /* Format version for indices created by this code */
 #define CURRENT_FORMAT_VERSION 2
 /* 1.4 leads to less aggressive pruning for better connectivity at scale */
