@@ -921,12 +921,14 @@ During final verification, discovered:
 **Problem Diagnosed:**
 
 Two engineers working simultaneously left test suite broken:
+
 - **C tests:** 13/192 failing (all metadata/filter vtab tests)
 - **TypeScript tests:** 54/94 failing (missing extension + metadata issues)
 
 **Root Cause Found:**
 
 Addition of `search_list_size` HIDDEN column shifted metadata argv indices:
+
 ```c
 // Old schema: vector, distance, k, <metadata> → argv[5+mi]
 // New schema: vector, distance, k, search_list_size, <metadata> → argv[6+mi]
@@ -952,6 +954,7 @@ Addition of `search_list_size` HIDDEN column shifted metadata argv indices:
    - Removed outdated comments about searchNearest not accepting options
 
 **Test Status After Fixes:**
+
 - ✅ **C tests:** 192/192 passing (100%)
 - ✅ **TypeScript tests:** 93/93 passing (100%, 0 skipped)
 
@@ -967,11 +970,13 @@ The flaky recall test revealed **positive news**: block size fix made the graph 
 - **Recall test validation:** Small datasets (2k vectors) insufficient for testing beam width impact with well-connected graphs
 
 **Files Modified:**
+
 - `src/diskann_vtab.c` - Metadata argv fix + search_list_size constraint handling
 - `tests/ts/extension-loading.test.ts` - Unskipped extension loading tests
 - `tests/ts/recall-scaling.test.ts` - Removed flaky beam width test
 
 **Commit History:**
+
 - Commit 08d11f4: `fix(diskann_vtab): correct metadata argv indices after search_list_size addition`
 - **NOT COMMITTED YET:** Extension test fixes (awaiting user approval)
 
@@ -980,12 +985,14 @@ The flaky recall test revealed **positive news**: block size fix made the graph 
 **Next Engineer Should:**
 
 1. **Commit test fixes** (if user approves):
+
    ```bash
    git add -A
    git commit -m "fix(tests): unskip extension loading and remove flaky recall test"
    ```
 
 2. **Run benchmarks** to validate cache/hash set performance:
+
    ```bash
    cd benchmarks
    rm -rf datasets/synthetic/*.db  # Rebuild with new block sizes
