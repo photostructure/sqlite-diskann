@@ -26,7 +26,7 @@ TEST_BIN = test_diskann
 STRESS_BIN = test_stress
 
 # Source files
-SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c $(SRC_DIR)/diskann_vtab.c
+SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_cache.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c $(SRC_DIR)/diskann_vtab.c
 TEST_C_SOURCES = $(filter-out %/test_runner.c %/test_stress.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
@@ -111,7 +111,7 @@ $(BUILD_DIR)/$(STRESS_BIN): $(SOURCES) $(TEST_DIR)/c/test_stress.c $(UNITY_SOURC
 	@echo "Built stress test suite: $@"
 
 $(BUILD_DIR)/$(TEST_BIN): $(SOURCES) $(TEST_C_SOURCES) $(TEST_RUNNER) $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -DTESTING -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
 	@echo "Built test suite: $@"
 
 # Run tests
@@ -129,16 +129,16 @@ asan:
 # Generate compile_commands.json for clang-tidy
 bear:
 	@command -v bear >/dev/null 2>&1 || { echo "Error: bear not installed. Install with: sudo apt install bear" >&2; exit 1; }
-	bear -- $(MAKE) clean all test || true
+	bear -- $(MAKE) clean all $(BUILD_DIR)/$(TEST_BIN) || true
 	@# Strip .o linker inputs that Bear captures (clang-tidy only compiles)
 	@python3 -c "import json;cc=json.load(open('compile_commands.json'));[e.__setitem__('arguments',[a for a in e['arguments'] if not a.endswith('.o')]) for e in cc];json.dump(cc,open('compile_commands.json','w'),indent=2)"
 
-# Run clang-tidy (auto-generates compile_commands.json if missing)
+# Run clang-tidy (requires compile_commands.json from bear)
 clang-tidy:
 	@command -v clang-tidy >/dev/null 2>&1 || { echo "Error: clang-tidy not installed" >&2; exit 1; }
 	@if [ ! -f compile_commands.json ]; then \
-		echo "compile_commands.json not found, generating with bear..."; \
-		$(MAKE) bear; \
+		echo "Error: compile_commands.json not found. Run 'make bear' first." >&2; \
+		exit 1; \
 	fi
 	clang-tidy $(SOURCES) $(TEST_C_SOURCES)
 
