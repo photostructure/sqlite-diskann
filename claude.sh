@@ -26,6 +26,19 @@ If your plan is accepted, be sure to update your TPP accordingly. Follow our sty
 
 **The user will revert your work if you don't follow this step**
 
+## `git` commit messages
+
+- Use Conventional Commits format. See https://www.conventionalcommits.org/en/v1.0.0/
+- For the "scope" of the Conventional Commit message, use the name of the file with the most important changes
+- Be concise: less than 5 lines. If you can't summarize the change in 5 lines, you probably need to break it up into smaller commits.
+- Do NOT include "Generated with [Claude Code]" messaging
+- Do NOT include any Co-Authored-By trailers
+- Do NOT include random counts of lines changed, files changed, tests added, etc.
+
+## ALWAYS ASK before you `git commit` or `git push`
+
+DO NOT EVER `git commit` or `git push` without asking the user first. You do not have full context of the state of the codebase.
+
 ## Concurrent Session Protocol
 
 **Assume multiple engineers are editing the same codebase simultaneously.**
