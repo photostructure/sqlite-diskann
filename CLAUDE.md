@@ -241,6 +241,12 @@ gcc -fsanitize=address -g src/*.c tests/*.c -o test_suite
 - Test with realistic dataset sizes (10K, 100K, 1M vectors)
 - Measure queries per second and recall@k
 
+### Performance Experiments
+
+**CRITICAL: Document all performance experiments in `experiments/` directory.**
+
+Performance tuning is expensive (hours of benchmark time). Before running benchmarks, copy `experiments/template.md` and document your hypothesis, expected results, setup. After completion, document actual results, analysis, and WHY results differed from expectations. Update `experiments/README.md` index. This prevents future engineers from repeating failed experiments. See `experiments/README.md` for full guidelines.
+
 ## Documentation
 
 ### Code Comments
