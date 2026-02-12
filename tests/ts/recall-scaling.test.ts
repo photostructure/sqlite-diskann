@@ -179,7 +179,6 @@ describe("DiskANN Recall Scaling", () => {
       const groundTruth = computeGroundTruth(query, vectors, k);
 
       // DiskANN search with increased beam width (200)
-      // THIS WILL FAIL - searchNearest() doesn't accept searchListSize parameter yet
       const results = searchNearest(db, indexName, query, k, {
         searchListSize: 200, // Override default
       });
