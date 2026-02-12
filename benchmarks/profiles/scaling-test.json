@@ -1,0 +1,55 @@
+{
+  "name": "Scaling Test: 10k → 200k",
+  "description": "Test how performance scales with dataset size to extrapolate to 500k+",
+  "datasets": [
+    {
+      "name": "synthetic-10k",
+      "dimensions": 256,
+      "count": 10000,
+      "metric": "cosine"
+    },
+    {
+      "name": "synthetic-25k",
+      "dimensions": 256,
+      "count": 25000,
+      "metric": "cosine"
+    },
+    {
+      "name": "synthetic-50k",
+      "dimensions": 256,
+      "count": 50000,
+      "metric": "cosine"
+    },
+    {
+      "name": "synthetic-100k",
+      "dimensions": 256,
+      "count": 100000,
+      "metric": "cosine"
+    },
+    {
+      "name": "synthetic-200k",
+      "dimensions": 256,
+      "count": 200000,
+      "metric": "cosine"
+    }
+  ],
+  "runners": [
+    {
+      "name": "diskann-balanced",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 100,
+        "searchListSize": 150
+      }
+    },
+    {
+      "name": "sqlite-vec",
+      "type": "vec"
+    }
+  ],
+  "queries": {
+    "count": 100,
+    "k": [10, 50, 100]
+  }
+}

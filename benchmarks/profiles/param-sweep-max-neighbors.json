@@ -1,0 +1,54 @@
+{
+  "name": "Parameter Sweep: max_neighbors",
+  "description": "Test impact of max_neighbors on index size, recall, and build time",
+  "datasets": [
+    {
+      "name": "synthetic",
+      "dimensions": 256,
+      "count": 50000,
+      "metric": "cosine"
+    }
+  ],
+  "runners": [
+    {
+      "name": "diskann-neighbors-24",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 24,
+        "buildSearchListSize": 100,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-neighbors-32",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 100,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-neighbors-48",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 48,
+        "buildSearchListSize": 100,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-neighbors-64",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 64,
+        "buildSearchListSize": 100,
+        "searchListSize": 100
+      }
+    }
+  ],
+  "queries": {
+    "count": 100,
+    "k": [1, 10, 50, 100]
+  }
+}

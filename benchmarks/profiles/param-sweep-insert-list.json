@@ -1,0 +1,63 @@
+{
+  "name": "Parameter Sweep: insert_list_size",
+  "description": "Test impact of insert_list_size on build time and recall",
+  "datasets": [
+    {
+      "name": "synthetic",
+      "dimensions": 256,
+      "count": 50000,
+      "metric": "cosine"
+    }
+  ],
+  "runners": [
+    {
+      "name": "diskann-insert-50",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 50,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-insert-75",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 75,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-insert-100",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 100,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-insert-150",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 150,
+        "searchListSize": 100
+      }
+    },
+    {
+      "name": "diskann-insert-200",
+      "type": "diskann",
+      "config": {
+        "maxDegree": 32,
+        "buildSearchListSize": 200,
+        "searchListSize": 100
+      }
+    }
+  ],
+  "queries": {
+    "count": 100,
+    "k": [1, 10, 50, 100]
+  }
+}
