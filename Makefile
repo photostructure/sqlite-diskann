@@ -1,7 +1,7 @@
 # sqlite-diskann Makefile
 # Cross-platform SQLite extension for DiskANN vector search
 
-.PHONY: all clean test test-native test-all test-stress check asan valgrind bear lint clang-tidy fmt help
+.PHONY: all clean test test-native test-all test-stress test-profiling check asan valgrind bear lint clang-tidy fmt help
 
 # Compiler and flags
 CC ?= gcc
@@ -24,10 +24,11 @@ BUILD_DIR = build
 EXTENSION = diskann.so
 TEST_BIN = test_diskann
 STRESS_BIN = test_stress
+PROFILE_BIN = test_profiling
 
 # Source files
 SOURCES = $(SRC_DIR)/diskann_api.c $(SRC_DIR)/diskann_blob.c $(SRC_DIR)/diskann_cache.c $(SRC_DIR)/diskann_insert.c $(SRC_DIR)/diskann_node.c $(SRC_DIR)/diskann_search.c $(SRC_DIR)/diskann_vtab.c
-TEST_C_SOURCES = $(filter-out %/test_runner.c %/test_stress.c, $(wildcard $(TEST_DIR)/c/test_*.c))
+TEST_C_SOURCES = $(filter-out %/test_runner.c %/test_stress.c %/test_profiling.c, $(wildcard $(TEST_DIR)/c/test_*.c))
 TEST_RUNNER = $(TEST_DIR)/c/test_runner.c
 UNITY_SOURCES = $(TEST_DIR)/c/unity/unity.c
 SQLITE_SOURCE = vendor/sqlite/sqlite3.c
@@ -110,6 +111,18 @@ $(BUILD_DIR)/$(STRESS_BIN): $(SOURCES) $(TEST_DIR)/c/test_stress.c $(UNITY_SOURC
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
 	@echo "Built stress test suite: $@"
 
+# Build and run profiling tests (insert timing at 10k scale)
+test-profiling: $(BUILD_DIR)/$(PROFILE_BIN)
+	@echo "Running profiling tests (this may take several minutes)..."
+	DISKANN_DEBUG_TIMING=1 $(BUILD_DIR)/$(PROFILE_BIN) 2>profiling_timing.csv
+	@echo "Timing data written to profiling_timing.csv"
+	@echo "Cleaning up profiling database files..."
+	@rm -f /tmp/diskann_profile_*.db*
+
+$(BUILD_DIR)/$(PROFILE_BIN): $(SOURCES) $(TEST_DIR)/c/test_profiling.c $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
+	@echo "Built profiling test suite: $@"
+
 $(BUILD_DIR)/$(TEST_BIN): $(SOURCES) $(TEST_C_SOURCES) $(TEST_RUNNER) $(UNITY_SOURCES) $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -DTESTING -I$(SRC_DIR) -I$(TEST_DIR)/c -o $@ $^ $(LIBS)
 	@echo "Built test suite: $@"
@@ -170,6 +183,7 @@ help:
 	@echo "  test-native  Build and run native C tests only"
 	@echo "  test-all     Build and run both native C and TypeScript tests"
 	@echo "  test-stress  Build and run stress tests (300k/100k vectors, takes ~5-10min)"
+	@echo "  test-profiling Build and run insert profiling (10k base + 500 incremental)"
 	@echo "  check        Alias for test"
 	@echo "  asan         Build and run with AddressSanitizer (fast memory checks)"
 	@echo "  valgrind     Build and run with Valgrind (thorough memory checks)"

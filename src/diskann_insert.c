@@ -6,6 +6,7 @@
 ** Copyright 2026 PhotoStructure Inc.
 ** MIT License
 */
+#define _POSIX_C_SOURCE 199309L
 #include "diskann.h"
 #include "diskann_blob.h"
 #include "diskann_cache.h"
@@ -14,7 +15,41 @@
 #include "diskann_search.h"
 #include "diskann_sqlite.h"
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
+
+/**************************************************************************
+** Insert timing instrumentation
+**
+** Set DISKANN_DEBUG_TIMING=1 to log per-insert phase timing to stderr.
+** Format is one CSV line per insert, suitable for parsing with awk/python.
+** Overhead when disabled: one static variable check per insert call.
+**************************************************************************/
+
+static int insert_timing_enabled(void) {
+  static int checked = 0;
+  static int enabled = 0;
+  if (!checked) {
+    const char *env = getenv("DISKANN_DEBUG_TIMING");
+    enabled = (env != NULL && env[0] != '0' && env[0] != '\0');
+    if (enabled) {
+      fprintf(stderr,
+              "DISKANN_TIMING_HEADER: id,total_us,random_start_us,savepoint_us,"
+              "search_us,shadow_row_us,phase1_us,phase2_us,flush_new_us,"
+              "cleanup_us,cache_hits,cache_misses,visited_count,"
+              "phase2_flushes\n");
+    }
+    checked = 1;
+  }
+  return enabled;
+}
+
+static long elapsed_us(const struct timespec *start,
+                       const struct timespec *end) {
+  return (long)(end->tv_sec - start->tv_sec) * 1000000L +
+         (long)(end->tv_nsec - start->tv_nsec) / 1000L;
+}
 
 /**************************************************************************
 ** Edge replacement decision
@@ -187,6 +222,17 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   int ctx_valid = 0;
   int savepoint_active = 0;
 
+  /* Timing instrumentation (zero cost when disabled) */
+  int timing = insert_timing_enabled();
+  struct timespec t_entry = {0}, t_random = {0}, t_savepoint = {0};
+  struct timespec t_search = {0}, t_shadow = {0}, t_phase1 = {0};
+  struct timespec t_phase2 = {0}, t_flush_new = {0}, t_exit = {0};
+  int phase2_flushes = 0;
+  int visited_count = 0;
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_entry);
+  }
+
   /* Validate inputs */
   if (!idx)
     return DISKANN_ERROR_INVALID;
@@ -202,6 +248,9 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
     first = 1;
   } else if (rc != DISKANN_OK) {
     return DISKANN_ERROR;
+  }
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_random);
   }
 
   /* Begin SAVEPOINT before search — writable blob handles require an
@@ -225,6 +274,9 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   }
   /* If SAVEPOINT failed (e.g., SQLITE_BUSY from vtab context), continue
    * without it — the caller's transaction provides atomicity. */
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_savepoint);
+  }
 
   /* Search for neighbors (skip if first node) */
   if (!first) {
@@ -249,12 +301,15 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
       goto out;
     }
 
-    /* Log cache statistics */
-    if (cache.hits + cache.misses > 0) {
-      float hit_rate =
-          100.0f * (float)cache.hits / (float)(cache.hits + cache.misses);
-      (void)hit_rate; /* TODO: Add logging infrastructure */
+    /* Count visited nodes for timing log */
+    if (timing) {
+      for (DiskAnnNode *v = ctx.visited_list; v != NULL; v = v->next) {
+        visited_count++;
+      }
     }
+  }
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_search);
   }
 
   /* Insert shadow row */
@@ -279,6 +334,9 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   }
 
   node_bin_init(idx, new_blob, (uint64_t)id, vector);
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_shadow);
+  }
 
   if (first) {
     /* First node: no edges to build, just flush and return */
@@ -307,6 +365,9 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
                           visited_vector);
     prune_edges(idx, new_blob, i_replace);
   }
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_phase1);
+  }
 
   /* Phase 2: add NEW node as edge to visited nodes */
   for (DiskAnnNode *visited = ctx.visited_list; visited != NULL;
@@ -327,12 +388,19 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
     if (rc != DISKANN_OK) {
       goto out;
     }
+    phase2_flushes++;
+  }
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_phase2);
   }
 
   /* Flush new node's blob */
   rc = blob_spot_flush(idx, new_blob);
   if (rc != DISKANN_OK) {
     goto out;
+  }
+  if (timing) {
+    clock_gettime(CLOCK_MONOTONIC, &t_flush_new);
   }
 
   rc = DISKANN_OK;
@@ -371,6 +439,21 @@ out:
   }
   if (ctx_valid) {
     diskann_search_ctx_deinit(&ctx);
+  }
+
+  /* Emit timing log line (only on success for non-first inserts) */
+  if (timing && !first && rc == DISKANN_OK) {
+    clock_gettime(CLOCK_MONOTONIC, &t_exit);
+    fprintf(
+        stderr,
+        "DISKANN_TIMING: %lld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,"
+        "%d,%d,%d,%d\n",
+        (long long)id, elapsed_us(&t_entry, &t_exit),
+        elapsed_us(&t_entry, &t_random), elapsed_us(&t_random, &t_savepoint),
+        elapsed_us(&t_savepoint, &t_search), elapsed_us(&t_search, &t_shadow),
+        elapsed_us(&t_shadow, &t_phase1), elapsed_us(&t_phase1, &t_phase2),
+        elapsed_us(&t_phase2, &t_flush_new), elapsed_us(&t_flush_new, &t_exit),
+        cache.hits, cache.misses, visited_count, phase2_flushes);
   }
 
   return rc;

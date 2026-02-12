@@ -370,10 +370,27 @@ int diskann_select_random_shadow_row(const DiskAnnIndex *idx, uint64_t *rowid) {
   sqlite3_stmt *stmt = NULL;
   int rc;
 
-  char *sql = sqlite3_mprintf(
-      "SELECT rowid FROM \"%w\".%s LIMIT 1 OFFSET ABS(RANDOM()) %% "
-      "MAX((SELECT COUNT(*) FROM \"%w\".%s), 1)",
-      idx->db_name, idx->shadow_name, idx->db_name, idx->shadow_name);
+  /*
+  ** Use MAX(rowid) + B-tree seek instead of COUNT(*) + OFFSET.
+  **
+  ** Previous query: LIMIT 1 OFFSET (RANDOM() % COUNT(*))
+  **   - COUNT(*) scans all rows: O(n)
+  **   - OFFSET n skips n rows: O(n)
+  **   - Total: O(n) — at 10k rows this was 26% of insert time (1.5ms)
+  **
+  ** New query: WHERE rowid >= (RANDOM() % MAX(rowid)) + 1 LIMIT 1
+  **   - MAX(rowid) reads rightmost B-tree leaf: O(1)
+  **   - WHERE rowid >= X seeks directly in B-tree: O(log n)
+  **   - Total: O(log n)
+  **
+  ** Not perfectly uniform when there are rowid gaps (from deletes),
+  ** but uniform enough for beam search starting point selection.
+  */
+  char *sql = sqlite3_mprintf("SELECT rowid FROM \"%w\".%s "
+                              "WHERE rowid >= (ABS(RANDOM()) %% "
+                              "(SELECT MAX(rowid) FROM \"%w\".%s)) + 1 LIMIT 1",
+                              idx->db_name, idx->shadow_name, idx->db_name,
+                              idx->shadow_name);
   if (sql == NULL) {
     return DISKANN_ERROR_NOMEM;
   }
@@ -385,15 +402,41 @@ int diskann_select_random_shadow_row(const DiskAnnIndex *idx, uint64_t *rowid) {
   }
 
   rc = sqlite3_step(stmt);
-  if (rc != SQLITE_ROW) {
-    /* SQLITE_DONE means empty table; propagate as-is */
+  if (rc == SQLITE_ROW) {
+    *rowid = (uint64_t)sqlite3_column_int64(stmt, 0);
     sqlite3_finalize(stmt);
-    return rc;
+    return DISKANN_OK;
+  }
+  sqlite3_finalize(stmt);
+
+  if (rc != SQLITE_DONE) {
+    return DISKANN_ERROR;
   }
 
-  *rowid = (uint64_t)sqlite3_column_int64(stmt, 0);
+  /* SQLITE_DONE: either empty table or random target past all rowids.
+  ** Fallback to first row — O(log n), reads leftmost B-tree leaf. */
+  sql = sqlite3_mprintf("SELECT rowid FROM \"%w\".%s LIMIT 1", idx->db_name,
+                        idx->shadow_name);
+  if (sql == NULL) {
+    return DISKANN_ERROR_NOMEM;
+  }
+
+  rc = sqlite3_prepare_v2(idx->db, sql, -1, &stmt, 0);
+  sqlite3_free(sql);
+  if (rc != SQLITE_OK) {
+    return DISKANN_ERROR;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    *rowid = (uint64_t)sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    return DISKANN_OK;
+  }
   sqlite3_finalize(stmt);
-  return DISKANN_OK;
+
+  /* SQLITE_DONE here = truly empty table */
+  return rc;
 }
 
 /**************************************************************************
