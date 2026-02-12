@@ -105,42 +105,114 @@ export interface MetadataColumn {
 
 /**
  * Configuration options for creating a DiskANN index
+ *
+ * @see {@link https://github.com/photostructure/sqlite-diskann/blob/main/PARAMETERS.md | Parameter Guide}
+ *   for detailed explanations, mutability, and recommended values
  */
 export interface DiskAnnIndexOptions {
   /**
-   * Vector dimension (must be > 0)
+   * Vector dimensionality (required)
+   *
+   * **🔒 IMMUTABLE** - Requires index rebuild to change
+   *
+   * Must match the size of vectors you'll insert. Common values:
+   * - Small models (MiniLM): 384
+   * - Medium models (BERT): 768
+   * - Large models (OpenAI): 1536
+   *
+   * @example 768  // BERT embeddings
    */
   dimension: number;
 
   /**
-   * Distance metric
-   * - "cosine": Cosine similarity (default for normalized embeddings)
-   * - "euclidean": L2 distance
-   * - "dot": Dot product (inner product)
+   * Distance metric for similarity search
+   *
+   * **🔒 IMMUTABLE** - Requires index rebuild to change
+   *
+   * - `"euclidean"`: L2 distance (default, general use)
+   * - `"cosine"`: Cosine similarity (recommended for text embeddings)
+   * - `"dot"`: Dot product (for pre-normalized vectors)
+   *
+   * @default "euclidean"
+   * @example "cosine"  // Recommended for text embeddings
    */
   metric?: DistanceMetric;
 
   /**
-   * Maximum degree of graph nodes (default: 64)
-   * Higher values improve recall but increase memory and index size
+   * Maximum edges per node in the graph
+   *
+   * **🔒 IMMUTABLE** - Requires index rebuild to change
+   *
+   * Determines block size and connectivity. Recommended:
+   * - Small datasets (<10k): 32
+   * - Medium (10k-100k): 64
+   * - Large (100k+): 96-128
+   *
+   * @default 64
+   * @example 96  // Higher connectivity for large datasets
    */
   maxDegree?: number;
 
   /**
-   * Search list size during index construction (default: 100)
-   * Higher values improve index quality but slow down insertions
+   * Beam width during INSERT (candidates explored when adding nodes)
+   *
+   * **⚠️ SEMI-MUTABLE** - Can be changed but requires rebuilding graph
+   *
+   * Major factor in build time (each insert = buildSearchListSize BLOB reads).
+   * Recommended:
+   * - Small datasets (<10k): 50-100
+   * - Medium (10k-100k): 100-150
+   * - Large (100k+): 150-200
+   *
+   * @default 200
+   * @example 100  // Faster builds with acceptable recall
    */
   buildSearchListSize?: number;
 
   /**
-   * Whether to normalize vectors during insertion (default: false)
-   * Set to true for cosine similarity with non-normalized inputs
+   * Beam width during search (candidates explored per query)
+   *
+   * **✅ RUNTIME MUTABLE** - Can be overridden per-query via SearchOptions
+   *
+   * Recommended:
+   * - Fast queries: 50-100
+   * - Balanced: 100-200
+   * - High recall: 200-500
+   *
+   * @default 100
+   * @example 150
+   * @see {@link SearchOptions.searchListSize} for per-query override
+   */
+  searchListSize?: number;
+
+  /**
+   * SQLite BLOB block size in bytes
+   *
+   * **🔒 IMMUTABLE** - Requires index rebuild to change
+   *
+   * Auto-calculated from dimension × maxDegree. Leave undefined for automatic.
+   *
+   * @default undefined (auto-calculate, recommended)
+   * @example undefined
+   */
+  blockSize?: number;
+
+  /**
+   * Whether to normalize vectors during insertion
+   *
+   * Set to true for cosine similarity with non-normalized inputs.
+   *
+   * @default false
    */
   normalizeVectors?: boolean;
 
   /**
    * Optional metadata columns to store alongside vectors
-   * Enables filtered search: WHERE vector MATCH ? AND k = 10 AND category = 'landscape'
+   *
+   * Enables filtered search:
+   * ```sql
+   * WHERE vector MATCH ? AND k = 10 AND category = 'landscape'
+   * ```
    *
    * @example
    * ```typescript
@@ -182,18 +254,47 @@ export interface NearestNeighborResult {
 }
 
 /**
- * Options for nearest neighbor search
+ * Options for controlling search behavior at query time
+ *
+ * All options can be specified per-query without rebuilding the index.
  */
 export interface SearchOptions {
   /**
-   * Number of neighbors to return (default: 10)
+   * Number of neighbors to return
+   *
+   * @default 10
+   * @example 10  // Return top 10 results
    */
   k?: number;
 
   /**
-   * Search beam width (default: 100)
-   * Higher values improve recall but slow down search
-   * Recommended range: [k, 10*k]
+   * Override search beam width for this query
+   *
+   * **✅ RUNTIME MUTABLE** - Can be changed per-query without rebuilding
+   *
+   * Overrides the default searchListSize stored in index metadata.
+   * Use this to tune recall/speed tradeoff on a per-query basis.
+   *
+   * Recommended:
+   * - Fast queries: 50-100
+   * - Balanced: 100-200
+   * - High recall: 200-500
+   *
+   * Rule of thumb: `searchListSize ≥ k × 2` for good recall
+   *
+   * @default Uses index's stored searchListSize (typically 100)
+   *
+   * @example
+   * ```typescript
+   * // Use index default
+   * searchNearest(db, 'vectors', query, 10)
+   *
+   * // Override for higher recall on this query
+   * searchNearest(db, 'vectors', query, 10, { searchListSize: 300 })
+   *
+   * // Fast query with lower recall
+   * searchNearest(db, 'vectors', query, 10, { searchListSize: 50 })
+   * ```
    */
   searchListSize?: number;
 }
