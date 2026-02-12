@@ -6,15 +6,13 @@
 
 SQLite extension for DiskANN approximate nearest neighbor vector search.
 
-📘 **[Full TypeScript API Documentation](https://photostructure.github.io/sqlite-diskann/)**
-
 ## What is this?
 
 A standalone SQLite extension implementing the [DiskANN algorithm](https://github.com/microsoft/DiskANN) for efficient vector similarity search at scale. Extracted from [libSQL's implementation](https://github.com/tursodatabase/libsql) and optimized for use as a standard SQLite extension.
 
-**This package is primarily designed for Node.js/TypeScript projects**--the releases include pre-built native binaries and TypeScript bindings.
+**This repo is packaged for Node.js projects**--the releases include pre-built native binaries and TypeScript bindings.
 
-The underlying C extension could certainly be compiled and used from other languages (Python, Ruby, Go, etc.) — see [Building from Source](#building-from-source) for the C API.
+However, the underlying C extension can be compiled and used from other languages (Python, Ruby, Go, etc.) — see [Building from Source](#building-from-source) for the C API. Contributions for other language bindings are welcome.
 
 **Key features:**
 
@@ -35,7 +33,7 @@ This package works with multiple SQLite library implementations through duck typ
 | -------------------------- | ---------------------- | ---------------------------------------- |
 | **@photostructure/sqlite** | npm package            | ✅ Stable, 100% `node:sqlite` compatible |
 | **better-sqlite3**         | npm package            | ✅ Mature, stable, widely used           |
-| **node:sqlite**            | Node.js 22.5+ built-in | ⚠️ Experimental (requires flag)          |
+| **node:sqlite**            | Node.js 22.5+ built-in | ⚠️ Experimental (see note below)         |
 
 ### Which should I use?
 
@@ -58,8 +56,8 @@ npm install @photostructure/sqlite
 npm install better-sqlite3
 
 # Option 3: Use Node.js 22.5+ built-in (no install needed)
-# Requires Node.js >= 22.5.0 and --experimental-sqlite flag
-# ⚠️ Still experimental (requires --experimental-sqlite flag)
+# ⚠️ Experimental — Node 22.5–22.12 requires --experimental-sqlite flag
+#    Node >= 22.13 / >= 23.4 no longer requires the flag
 ```
 
 ## Quick Start
