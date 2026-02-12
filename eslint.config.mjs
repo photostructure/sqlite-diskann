@@ -52,6 +52,7 @@ export default [
     files: ["**/*.test.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",
+      "security/detect-object-injection": "off", // False positives on array indexing in tests
     },
   },
 ];
