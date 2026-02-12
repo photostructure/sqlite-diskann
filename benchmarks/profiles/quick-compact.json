@@ -1,0 +1,28 @@
+{
+  "name": "Quick test with smaller maxDegree",
+  "dataset": {
+    "path": "datasets/synthetic/small-64d-10k.bin"
+  },
+  "queries": {
+    "count": 200,
+    "k": [10]
+  },
+  "libraries": [
+    {
+      "name": "diskann"
+    }
+  ],
+  "diskann": {
+    "maxDegree": [32],
+    "buildSearchListSize": [100],
+    "searchListSize": [100],
+    "metric": "euclidean",
+    "normalizeVectors": false
+  },
+  "metrics": {
+    "computeRecall": true,
+    "measureMemory": false,
+    "warmupQueries": 10,
+    "groundTruthPath": "datasets/ground-truth/small-64d-10k.json"
+  }
+}

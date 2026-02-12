@@ -1,0 +1,12 @@
+# Generated datasets (300MB+) - regenerate with npm run prepare
+datasets/
+
+# Benchmark results - timestamped output files
+results-*.json
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo

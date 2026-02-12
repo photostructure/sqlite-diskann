@@ -1,0 +1,31 @@
+{
+  "name": "Medium benchmark (25k vectors)",
+  "dataset": {
+    "path": "datasets/synthetic/medium-256d-25k.bin"
+  },
+  "queries": {
+    "count": 200,
+    "k": [1, 10, 50, 100]
+  },
+  "libraries": [
+    {
+      "name": "vec"
+    },
+    {
+      "name": "diskann"
+    }
+  ],
+  "diskann": {
+    "maxDegree": [32],
+    "buildSearchListSize": [200],
+    "searchListSize": [500],
+    "metric": "euclidean",
+    "normalizeVectors": false
+  },
+  "metrics": {
+    "computeRecall": true,
+    "measureMemory": true,
+    "warmupQueries": 20,
+    "groundTruthPath": "datasets/ground-truth/medium-256d-25k.json"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "sqlite-diskann-benchmarks",
+  "version": "0.1.0",
+  "description": "Performance benchmarks comparing sqlite-diskann vs sqlite-vec",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prepare": "tsx scripts/prepare-datasets.ts",
+    "bench": "tsx scripts/run-benchmark.ts",
+    "bench:quick": "npm run bench profiles/quick.json",
+    "bench:medium": "npm run bench profiles/medium.json",
+    "bench:standard": "npm run bench profiles/standard.json",
+    "bench:recall": "npm run bench profiles/recall-sweep.json"
+  },
+  "dependencies": {
+    "cli-table3": "^0.6.5",
+    "sqlite-vec": "file:../../sqlite-vec"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

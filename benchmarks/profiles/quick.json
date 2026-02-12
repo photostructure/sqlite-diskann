@@ -1,0 +1,31 @@
+{
+  "name": "Quick smoke test",
+  "dataset": {
+    "path": "datasets/synthetic/small-64d-10k.bin"
+  },
+  "queries": {
+    "count": 200,
+    "k": [10]
+  },
+  "libraries": [
+    {
+      "name": "vec"
+    },
+    {
+      "name": "diskann"
+    }
+  ],
+  "diskann": {
+    "maxDegree": [64],
+    "buildSearchListSize": [100],
+    "searchListSize": [100],
+    "metric": "euclidean",
+    "normalizeVectors": false
+  },
+  "metrics": {
+    "computeRecall": true,
+    "measureMemory": false,
+    "warmupQueries": 10,
+    "groundTruthPath": "datasets/ground-truth/small-64d-10k.json"
+  }
+}

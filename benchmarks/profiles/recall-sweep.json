@@ -1,0 +1,28 @@
+{
+  "name": "DiskANN recall vs speed trade-off",
+  "dataset": {
+    "path": "datasets/synthetic/medium-256d-100k.bin"
+  },
+  "queries": {
+    "count": 500,
+    "k": [10]
+  },
+  "libraries": [
+    {
+      "name": "diskann"
+    }
+  ],
+  "diskann": {
+    "maxDegree": [64],
+    "buildSearchListSize": [100],
+    "searchListSize": [10, 20, 50, 100, 200, 500],
+    "metric": "euclidean",
+    "normalizeVectors": false
+  },
+  "metrics": {
+    "computeRecall": true,
+    "measureMemory": false,
+    "warmupQueries": 50,
+    "groundTruthPath": "datasets/ground-truth/medium-256d-100k.json"
+  }
+}
