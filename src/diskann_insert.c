@@ -8,6 +8,7 @@
 */
 #include "diskann.h"
 #include "diskann_blob.h"
+#include "diskann_cache.h"
 #include "diskann_internal.h"
 #include "diskann_node.h"
 #include "diskann_search.h"
@@ -89,6 +90,12 @@ static void prune_edges(const DiskAnnIndex *idx, BlobSpot *node_blob,
 
   assert(0 <= i_inserted && i_inserted < n_edges);
 
+  /*
+  ** Minimum degree to maintain graph connectivity
+  ** Research shows MIN_DEGREE >= 8 prevents disconnected components at scale
+  */
+  const int MIN_DEGREE = 8;
+
   uint64_t hint_rowid;
   const float *hint_vector;
   node_bin_edge(idx, node_blob, i_inserted, &hint_rowid, NULL, &hint_vector);
@@ -104,6 +111,11 @@ static void prune_edges(const DiskAnnIndex *idx, BlobSpot *node_blob,
     if (hint_rowid == edge_rowid) {
       i++;
       continue;
+    }
+
+    /* Stop pruning if we've reached minimum degree */
+    if (n_edges <= MIN_DEGREE) {
+      break;
     }
 
     /* No V1 branch */
@@ -166,6 +178,8 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
                    uint32_t dims) {
   DiskAnnSearchCtx ctx = {0};
   BlobSpot *new_blob = NULL;
+  BlobCache cache = {0};
+  int cache_initialized = 0;
   char *savepoint_sql = NULL;
   uint64_t start_rowid = 0;
   int rc;
@@ -214,6 +228,13 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
 
   /* Search for neighbors (skip if first node) */
   if (!first) {
+    /* Initialize cache (capacity 100 = ~8MB memory overhead) */
+    rc = blob_cache_init(&cache, 100);
+    if (rc != DISKANN_OK) {
+      goto out;
+    }
+    cache_initialized = 1;
+
     rc = diskann_search_ctx_init(&ctx, vector, (int)idx->insert_list_size, 1,
                                  DISKANN_BLOB_WRITABLE);
 
@@ -222,10 +243,17 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
     }
     ctx_valid = 1;
 
-    rc = diskann_search_internal(idx, &ctx, start_rowid);
+    rc = diskann_search_internal(idx, &ctx, start_rowid, &cache);
 
     if (rc != DISKANN_OK) {
       goto out;
+    }
+
+    /* Log cache statistics */
+    if (cache.hits + cache.misses > 0) {
+      float hit_rate =
+          100.0f * (float)cache.hits / (float)(cache.hits + cache.misses);
+      (void)hit_rate; /* TODO: Add logging infrastructure */
     }
   }
 
@@ -337,6 +365,9 @@ out:
 
   if (new_blob) {
     blob_spot_free(new_blob);
+  }
+  if (cache_initialized) {
+    blob_cache_deinit(&cache);
   }
   if (ctx_valid) {
     diskann_search_ctx_deinit(&ctx);

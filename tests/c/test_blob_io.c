@@ -20,7 +20,7 @@ static DiskAnnIndex *create_and_open_test_index(sqlite3 *db, const char *name) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   int rc = diskann_create_index(db, "main", name, &config);
   if (rc != DISKANN_OK)

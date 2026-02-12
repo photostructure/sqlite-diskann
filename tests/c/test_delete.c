@@ -14,11 +14,10 @@
 #include <string.h>
 
 /*
-** Test configuration: 3D vectors, 256-byte blocks.
-** This gives 8 max edges per node — enough for testing.
+** Test configuration: 3D vectors, auto-calculated block size.
 */
 #define TEST_DIMS 3
-#define TEST_BLOCK_SIZE 256
+#define TEST_BLOCK_SIZE 0
 
 /* ========================================================================
 ** Helpers

@@ -1,7 +1,7 @@
 ---
 name: handoff
 description: Update TPP with session discoveries, completed work, and blockers. Use when context is getting full (80-90%) or when switching tasks.
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools: Read, Edit, Grep, Glob
 ---
 

@@ -21,7 +21,7 @@ void test_create_index_with_valid_params(void) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   rc = diskann_create_index(db, "main", "test_index", &config);
   TEST_ASSERT_EQUAL(DISKANN_OK, rc);
@@ -120,7 +120,7 @@ void test_shadow_table_schema(void) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
   int rc = diskann_create_index(db, "main", "test_index", &config);
   TEST_ASSERT_EQUAL(DISKANN_OK, rc);
 
@@ -159,7 +159,7 @@ void test_create_index_invalid_name(void) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   /* SQL injection attempt */
   rc = diskann_create_index(db, "main", "'; DROP TABLE x;--", &config);
@@ -198,7 +198,7 @@ void test_metadata_roundtrip(void) {
                           .max_neighbors = 64,
                           .search_list_size = 150,
                           .insert_list_size = 300,
-                          .block_size = 8192};
+                          .block_size = 0};
 
   rc = diskann_create_index(db, "main", "test_rt", &config);
   TEST_ASSERT_EQUAL(DISKANN_OK, rc);
@@ -214,7 +214,8 @@ void test_metadata_roundtrip(void) {
   TEST_ASSERT_EQUAL_UINT32(64, idx->max_neighbors);
   TEST_ASSERT_EQUAL_UINT32(150, idx->search_list_size);
   TEST_ASSERT_EQUAL_UINT32(300, idx->insert_list_size);
-  TEST_ASSERT_EQUAL_UINT32(8192, idx->block_size);
+  /* block_size is auto-calculated: 512D/64-neighbors needs 147,456 bytes */
+  TEST_ASSERT_EQUAL_UINT32(147456, idx->block_size);
 
   diskann_close_index(idx);
   sqlite3_close(db);
@@ -233,7 +234,7 @@ void test_create_index_duplicate_fails(void) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   /* First create should succeed */
   rc = diskann_create_index(db, "main", "dup_test", &config);
@@ -274,7 +275,7 @@ void test_create_index_atomicity(void) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   /* Create, drop, recreate should work cleanly */
   rc = diskann_create_index(db, "main", "atomic_test", &config);

@@ -14,6 +14,7 @@ import type {
   DatabaseLike,
   DiskAnnIndexOptions,
   NearestNeighborResult,
+  SearchOptions,
 } from "./types.js";
 
 /**
@@ -263,7 +264,8 @@ export function searchNearest(
   db: DatabaseLike,
   tableName: string,
   queryVector: Float32Array | number[],
-  k = 10
+  k = 10,
+  options?: SearchOptions
 ): NearestNeighborResult[] {
   // Validate table name to prevent SQL injection
   if (!isValidIdentifier(tableName)) {
@@ -284,15 +286,28 @@ export function searchNearest(
   const vecArray =
     queryVector instanceof Float32Array ? queryVector : new Float32Array(queryVector);
 
-  // Execute search using MATCH operator
-  // tableName is validated above, safe to interpolate
-  const stmt = db.prepare(`
+  // Build SQL with optional search_list_size constraint
+  let sql = `
     SELECT rowid, distance
     FROM ${tableName}
-    WHERE vector MATCH ? AND k = ?
-  `);
+    WHERE vector MATCH ? AND k = ?`;
 
-  const results = stmt.all(vecArray, k) as NearestNeighborResult[];
+  const params: unknown[] = [vecArray, k];
+
+  // Add search_list_size constraint if specified
+  if (options?.searchListSize !== undefined) {
+    if (!Number.isInteger(options.searchListSize) || options.searchListSize <= 0) {
+      throw new Error(
+        `Invalid searchListSize: ${options.searchListSize} (must be positive integer)`
+      );
+    }
+    sql += ` AND search_list_size = ?`;
+    params.push(options.searchListSize);
+  }
+
+  // Execute search
+  const stmt = db.prepare(sql);
+  const results = stmt.all(...params) as NearestNeighborResult[];
   return results;
 }
 

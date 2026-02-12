@@ -99,6 +99,11 @@ static float *gen_vectors(int n_vectors, uint32_t seed) {
 static void brute_force_knn(const float *vectors, int n_vectors,
                             const float *query, int k, int64_t *out_ids,
                             float *out_distances) {
+  /* Early return to satisfy static analyzer */
+  if (n_vectors <= 0) {
+    return;
+  }
+
   float *dists = (float *)malloc((size_t)n_vectors * sizeof(float));
   int *indices = (int *)malloc((size_t)n_vectors * sizeof(int));
   TEST_ASSERT_NOT_NULL(dists);

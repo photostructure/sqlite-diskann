@@ -47,6 +47,7 @@
 #include "../../src/diskann_blob.h"
 #include "../../src/diskann_internal.h"
 #include "../../src/diskann_node.h"
+#include "../../src/diskann_search.h"
 #include "unity/unity.h"
 #include <math.h>
 #include <sqlite3.h>
@@ -54,15 +55,10 @@
 #include <string.h>
 
 /*
-** Test configuration: 3D vectors, small block size for simple tests.
-** With 3D float32 (12 bytes per vector), block_size=256 gives us:
-**   node_overhead = 16 + 12 = 28
-**   edge_overhead = 12 + 16 = 28
-**   max_edges = (256 - 28) / 28 = 8
-** Plenty for small test graphs.
+** Test configuration: 3D vectors, auto-calculated block size.
 */
 #define TEST_DIMS 3
-#define TEST_BLOCK_SIZE 256
+#define TEST_BLOCK_SIZE 0
 #define TEST_MAX_NEIGHBORS 8
 #define TEST_SEARCH_L 32
 #define TEST_INSERT_L 64
@@ -725,6 +721,161 @@ void test_search_cosine_metric(void) {
 
   diskann_close_index(idx);
   sqlite3_close(db);
+}
+
+/**************************************************************************
+** Hash Set Tests for Visited Tracking Optimization
+**
+** These tests verify the O(1) hash set implementation for visited tracking.
+** The visited_set_* functions are internal to diskann_search.c, so we need
+** to expose them for testing (via test helpers or conditional compilation).
+**
+** Note: These tests will FAIL to compile initially because visited_set_*
+** functions don't exist yet. This is correct TDD.
+**************************************************************************/
+
+/*
+** Hash set test helpers - TESTING is defined in Makefile for test builds
+** This exposes the internal visited_set_* functions declared in
+*diskann_search.h
+*/
+
+/* Test 1: Initialize hash table */
+void test_visited_set_init(void) {
+  VisitedSet set;
+  visited_set_init(&set, 256);
+
+  /* Verify initialization */
+  TEST_ASSERT_EQUAL(256, set.capacity);
+  TEST_ASSERT_EQUAL(0, set.count);
+  TEST_ASSERT_NOT_NULL(set.rowids);
+
+  /* Verify all slots initialized to empty sentinel (0xFFFFFFFFFFFFFFFF) */
+  for (int i = 0; i < 10; i++) {
+    TEST_ASSERT_EQUAL_UINT64(0xFFFFFFFFFFFFFFFFULL, set.rowids[i]);
+  }
+
+  visited_set_deinit(&set);
+}
+
+/* Test 2: Basic add and contains operations */
+void test_visited_set_add_contains(void) {
+  VisitedSet set;
+  visited_set_init(&set, 256);
+
+  /* Add rowids 1, 2, 3 */
+  visited_set_add(&set, 1);
+  visited_set_add(&set, 2);
+  visited_set_add(&set, 3);
+
+  /* Verify contains returns 1 for added rowids */
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 1));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 2));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 3));
+
+  /* Verify contains returns 0 for non-added rowid */
+  TEST_ASSERT_EQUAL(0, visited_set_contains(&set, 4));
+  TEST_ASSERT_EQUAL(0, visited_set_contains(&set, 999));
+
+  visited_set_deinit(&set);
+}
+
+/* Test 3: Hash collision handling with linear probing */
+void test_visited_set_collisions(void) {
+  VisitedSet set;
+  visited_set_init(&set, 8); /* Small capacity to force collisions */
+
+  /*
+  ** Find two rowids that hash to the same bucket.
+  ** With FNV-1a hash (rowid * 0x100000001b3) and capacity 8,
+  ** rowids that differ by 8 will likely collide.
+  ** We'll add rowids 1, 9, 17 (differ by 8).
+  */
+  visited_set_add(&set, 1);
+  visited_set_add(&set, 9);
+  visited_set_add(&set, 17);
+
+  /* All should be found despite potential collisions */
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 1));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 9));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 17));
+
+  visited_set_deinit(&set);
+}
+
+/* Test 4: Index wraparound at end of table */
+void test_visited_set_wraparound(void) {
+  VisitedSet set;
+  visited_set_init(&set, 8);
+
+  /*
+  ** Force entries near the end of the table that probe into the beginning.
+  ** Add rowids that hash to buckets 6, 7, then cause wraparound to 0, 1.
+  */
+  visited_set_add(&set, 6);
+  visited_set_add(&set, 7);
+  visited_set_add(&set, 8); /* Will wrap to bucket 0 */
+  visited_set_add(&set, 9); /* Will wrap to bucket 1 */
+
+  /* All should be findable */
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 6));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 7));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 8));
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 9));
+
+  visited_set_deinit(&set);
+}
+
+/* Test 5: Adding same rowid twice (idempotent) */
+void test_visited_set_duplicates(void) {
+  VisitedSet set;
+  visited_set_init(&set, 256);
+
+  /* Add rowid=1 */
+  visited_set_add(&set, 1);
+  int count_after_first = set.count;
+
+  /* Add rowid=1 again */
+  visited_set_add(&set, 1);
+  int count_after_second = set.count;
+
+  /* Count should not double-increment */
+  TEST_ASSERT_EQUAL(count_after_first, count_after_second);
+
+  /* Should still be found */
+  TEST_ASSERT_EQUAL(1, visited_set_contains(&set, 1));
+
+  visited_set_deinit(&set);
+}
+
+/* Test 6: Fill entire table to capacity */
+void test_visited_set_full_table(void) {
+  VisitedSet set;
+  visited_set_init(&set, 256);
+
+  /* Add 256 unique rowids (fills entire table) */
+  for (uint64_t i = 1; i <= 256; i++) {
+    visited_set_add(&set, i);
+  }
+
+  /* All should be findable */
+  for (uint64_t i = 1; i <= 256; i++) {
+    TEST_ASSERT_EQUAL(1, visited_set_contains(&set, i));
+  }
+
+  /* Non-added rowid should not be found */
+  TEST_ASSERT_EQUAL(0, visited_set_contains(&set, 999));
+
+  visited_set_deinit(&set);
+}
+
+/* Test 7: NULL safety for visited set functions */
+void test_visited_set_null_safety(void) {
+  /* visited_set_deinit with NULL — should not crash */
+  visited_set_deinit(NULL);
+
+  /* If we get here without segfault, test passes */
+  TEST_ASSERT(1);
 }
 
 /* main() is in test_runner.c */

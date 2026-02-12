@@ -567,7 +567,7 @@ void test_open_index_computes_derived_fields(void) {
                           .max_neighbors = 16,
                           .search_list_size = 50,
                           .insert_list_size = 100,
-                          .block_size = 8192};
+                          .block_size = 0};
 
   rc = diskann_create_index(db, "main", "test_idx", &config);
   TEST_ASSERT_EQUAL(DISKANN_OK, rc);
@@ -579,7 +579,8 @@ void test_open_index_computes_derived_fields(void) {
   /* Verify derived fields */
   TEST_ASSERT_EQUAL_UINT32(128 * sizeof(float), idx->nNodeVectorSize);
   TEST_ASSERT_EQUAL_UINT32(idx->nNodeVectorSize, idx->nEdgeVectorSize);
-  TEST_ASSERT_FLOAT_WITHIN(0.01, 1.2, idx->pruning_alpha);
+  /* pruning_alpha default changed from 1.2 to 1.4 for better connectivity */
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 1.4, idx->pruning_alpha);
 
   diskann_close_index(idx);
   sqlite3_close(db);

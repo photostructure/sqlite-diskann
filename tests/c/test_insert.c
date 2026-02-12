@@ -109,7 +109,7 @@ void test_insert_null_vector(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_null_vec", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -127,7 +127,7 @@ void test_insert_dimension_mismatch(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_dim_mismatch", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -150,7 +150,7 @@ void test_insert_first_vector(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_first", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -179,7 +179,7 @@ void test_insert_two_vectors(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_two", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -214,7 +214,7 @@ void test_insert_duplicate_id(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_dup", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -245,7 +245,7 @@ void test_insert_ten_vectors_searchable(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_ten", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -282,7 +282,7 @@ void test_insert_edge_count_limit(void) {
                        .max_neighbors = 4,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_limit", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -315,7 +315,7 @@ void test_insert_recall(void) {
                        .max_neighbors = 8,
                        .search_list_size = 30,
                        .insert_list_size = 40,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_recall", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -391,7 +391,7 @@ void test_insert_delete_search(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_ids", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 
@@ -437,7 +437,7 @@ void test_insert_cosine_metric(void) {
                        .max_neighbors = 8,
                        .search_list_size = 20,
                        .insert_list_size = 30,
-                       .block_size = 4096};
+                       .block_size = 0};
   DiskAnnIndex *idx = create_and_open(db, "test_cosine", &cfg);
   TEST_ASSERT_NOT_NULL(idx);
 

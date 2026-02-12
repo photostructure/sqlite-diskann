@@ -417,7 +417,8 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
   stmt = NULL;
 
   /* Check format version compatibility
-   * TEMPORARY: During development, allow opening old indices (format_version 0 or 1)
+   * TEMPORARY: During development, allow opening old indices (format_version 0
+   * or 1)
    * TODO: Remove this workaround after migration - require version 2
    */
   if (format_version > CURRENT_FORMAT_VERSION) {
@@ -427,7 +428,8 @@ int diskann_open_index(sqlite3 *db, const char *db_name, const char *index_name,
     rc = DISKANN_ERROR_VERSION;
     goto cleanup;
   }
-  /* Note: format_version == 0 or 1 allowed for now (backward compat during dev) */
+  /* Note: format_version == 0 or 1 allowed for now (backward compat during dev)
+   */
 
   /* Validate required metadata was loaded and within bounds */
   if (idx->dimensions == 0 || idx->dimensions > MAX_DIMENSIONS) {

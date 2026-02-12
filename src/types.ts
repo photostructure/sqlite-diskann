@@ -13,7 +13,7 @@ export interface StatementLike {
    * Execute statement and return info about changes
    */
   run(...params: unknown[]): {
-    changes: number;
+    changes: number | bigint;
     lastInsertRowid: number | bigint;
   };
 

@@ -24,6 +24,25 @@
 extern "C" {
 #endif
 
+/* Forward declaration for cache parameter */
+typedef struct BlobCache BlobCache;
+
+/*
+** VisitedSet — O(1) hash set for visited tracking (build speed optimization)
+**
+** Uses open addressing with linear probing and FNV-1a hash.
+** Capacity must be power of 2 for fast modulo via bitwise AND.
+** Empty slots marked with 0xFFFFFFFFFFFFFFFF sentinel.
+**
+** Memory ownership:
+** - rowids: owned array (malloc'd, freed in deinit)
+*/
+typedef struct VisitedSet {
+  uint64_t *rowids; /* Hash table (0xFFFFFFFFFFFFFFFF = empty) */
+  int capacity;     /* Power of 2 (default 256) */
+  int count;        /* Number of entries */
+} VisitedSet;
+
 /*
 ** Search context — manages candidates, visited nodes, and top-K results
 ** during beam search traversal.
@@ -33,6 +52,7 @@ extern "C" {
 ** - candidates / distances: owned parallel arrays (malloc'd)
 ** - top_candidates / top_distances: owned parallel arrays (malloc'd)
 ** - visited_list: linked list of visited DiskAnnNodes (all freed in deinit)
+** - visited_set: hash set for O(1) visited checks (freed in deinit)
 ** - Unvisited candidates in the candidates array are also freed in deinit
 */
 typedef struct DiskAnnSearchCtx {
@@ -46,6 +66,7 @@ typedef struct DiskAnnSearchCtx {
   int n_top_candidates;
   int max_top_candidates;    /* = k */
   DiskAnnNode *visited_list; /* linked list of visited nodes */
+  VisitedSet visited_set;    /* hash set for O(1) visited checks */
   int n_unvisited;
   int blob_mode;             /* DISKANN_BLOB_READONLY or WRITABLE */
   DiskAnnFilterFn filter_fn; /* NULL = no filter (accept all) */
@@ -89,10 +110,27 @@ int diskann_select_random_shadow_row(const DiskAnnIndex *idx, uint64_t *rowid);
 **
 ** Used by both search (READONLY mode) and insert (WRITABLE mode).
 **
+** Parameters:
+**   idx        - Index handle
+**   ctx        - Search context (receives results)
+**   start_rowid- Starting node for beam search
+**   cache      - Optional BLOB cache (NULL = no caching)
+**
 ** Returns DISKANN_OK on success, negative error code on failure.
 */
 int diskann_search_internal(DiskAnnIndex *idx, DiskAnnSearchCtx *ctx,
-                            uint64_t start_rowid);
+                            uint64_t start_rowid, BlobCache *cache);
+
+/*
+** Test helpers for hash set unit tests.
+** These expose internal static functions for testing purposes.
+*/
+#ifdef TESTING
+void visited_set_init(VisitedSet *set, int capacity);
+int visited_set_contains(const VisitedSet *set, uint64_t rowid);
+void visited_set_add(VisitedSet *set, uint64_t rowid);
+void visited_set_deinit(VisitedSet *set);
+#endif
 
 #ifdef __cplusplus
 }

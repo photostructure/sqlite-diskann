@@ -19,7 +19,7 @@ void test_diskann_create_index_exists(void) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   int rc = sqlite3_open(":memory:", &db);
   TEST_ASSERT_EQUAL(SQLITE_OK, rc);

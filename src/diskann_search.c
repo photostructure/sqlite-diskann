@@ -9,6 +9,7 @@
 #include "diskann_search.h"
 #include "diskann.h"
 #include "diskann_blob.h"
+#include "diskann_cache.h"
 #include "diskann_internal.h"
 #include "diskann_node.h"
 #include "diskann_sqlite.h"
@@ -17,17 +18,135 @@
 #include <string.h>
 
 /**************************************************************************
+** VisitedSet — O(1) hash set for visited tracking (build speed optimization)
+**************************************************************************/
+
+#define VISITED_SET_EMPTY 0xFFFFFFFFFFFFFFFFULL
+
+/* FNV-1a hash for 64-bit integers */
+static uint64_t hash_rowid(uint64_t rowid) { return rowid * 0x100000001b3ULL; }
+
+/* Round up to next power of 2 (for hash table sizing) */
+static int next_power_of_2(int n) {
+  if (n <= 0)
+    return 1;
+  n--;
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  return n + 1;
+}
+
+/* Initialize hash set with power-of-2 capacity */
+#ifdef TESTING
+void
+#else
+static void
+#endif
+visited_set_init(VisitedSet *set, int capacity) {
+  assert(set);
+  assert(capacity > 0 && (capacity & (capacity - 1)) == 0); /* power of 2 */
+
+  set->capacity = capacity;
+  set->count = 0;
+  set->rowids =
+      (uint64_t *)sqlite3_malloc64((uint64_t)capacity * sizeof(uint64_t));
+
+  if (set->rowids) {
+    for (int i = 0; i < capacity; i++) {
+      set->rowids[i] = VISITED_SET_EMPTY;
+    }
+  }
+}
+
+/* Check if rowid is in the set (returns 1 if found, 0 otherwise) */
+#ifdef TESTING
+int
+#else
+static int
+#endif
+visited_set_contains(const VisitedSet *set, uint64_t rowid) {
+  if (!set || !set->rowids) {
+    return 0;
+  }
+
+  uint64_t hash = hash_rowid(rowid);
+  int idx = (int)(hash & (uint64_t)(set->capacity - 1));
+
+  /* Linear probe until we find rowid or empty slot */
+  for (int i = 0; i < set->capacity; i++) {
+    int probe = (idx + i) & (set->capacity - 1);
+    if (set->rowids[probe] == VISITED_SET_EMPTY) {
+      return 0; /* Not found */
+    }
+    if (set->rowids[probe] == rowid) {
+      return 1; /* Found */
+    }
+  }
+
+  return 0; /* Table full, not found */
+}
+
+/* Add rowid to the set (idempotent - safe to add same rowid twice) */
+#ifdef TESTING
+void
+#else
+static void
+#endif
+visited_set_add(VisitedSet *set, uint64_t rowid) {
+  if (!set || !set->rowids) {
+    return;
+  }
+
+  uint64_t hash = hash_rowid(rowid);
+  int idx = (int)(hash & (uint64_t)(set->capacity - 1));
+
+  /* Linear probe until we find empty slot or existing rowid */
+  for (int i = 0; i < set->capacity; i++) {
+    int probe = (idx + i) & (set->capacity - 1);
+    if (set->rowids[probe] == VISITED_SET_EMPTY) {
+      set->rowids[probe] = rowid;
+      set->count++;
+      return;
+    }
+    if (set->rowids[probe] == rowid) {
+      return; /* Already in set */
+    }
+  }
+
+  /* Table full - should never happen with dynamic capacity (1.3×
+   * max_candidates) */
+  assert(0 && "VisitedSet full - increase capacity");
+}
+
+/* Free hash set resources */
+#ifdef TESTING
+void
+#else
+static void
+#endif
+visited_set_deinit(VisitedSet *set) {
+  if (set && set->rowids) {
+    sqlite3_free(set->rowids);
+    set->rowids = NULL;
+    set->count = 0;
+  }
+}
+
+/* Test helper exports (conditional compilation) - no-op, functions already
+ * static */
+/* The static functions above are exposed via the header when TESTING is defined
+ */
+
+/**************************************************************************
 ** Search context — static helpers
 **************************************************************************/
 
-/* Check if a node has already been visited */
+/* Check if a node has already been visited (now uses O(1) hash set) */
 static int search_ctx_is_visited(const DiskAnnSearchCtx *ctx, uint64_t rowid) {
-  for (DiskAnnNode *node = ctx->visited_list; node != NULL; node = node->next) {
-    if (node->rowid == rowid) {
-      return 1;
-    }
-  }
-  return 0;
+  return visited_set_contains(&ctx->visited_set, rowid);
 }
 
 /* Check if a node is already in the candidate queue */
@@ -53,7 +172,7 @@ static int search_ctx_should_add(const DiskAnnSearchCtx *ctx,
 
 /*
 ** Mark a node as visited: set visited flag, prepend to visited list,
-** and insert into top-K results if distance qualifies.
+** add to hash set, and insert into top-K results if distance qualifies.
 */
 static void search_ctx_mark_visited(DiskAnnSearchCtx *ctx, DiskAnnNode *node,
                                     float distance) {
@@ -65,6 +184,9 @@ static void search_ctx_mark_visited(DiskAnnSearchCtx *ctx, DiskAnnNode *node,
 
   node->next = ctx->visited_list;
   ctx->visited_list = node;
+
+  /* Add to hash set for O(1) future lookups */
+  visited_set_add(&ctx->visited_set, node->rowid);
 
   /* Filter gate: skip top-K insertion if filter rejects this rowid.
   ** Node is still visited (graph bridge) — only result set is filtered. */
@@ -174,6 +296,16 @@ int diskann_search_ctx_init(DiskAnnSearchCtx *ctx, const float *query,
   ctx->filter_fn = NULL;
   ctx->filter_ctx = NULL;
 
+  /* Initialize hash set for O(1) visited checks
+   * Capacity = next power-of-2 >= max_candidates * 1.3 (30% margin for hash
+   * collisions) Minimum capacity = 256
+   */
+  int required_capacity = (int)((float)max_candidates * 1.3f);
+  int capacity = next_power_of_2(required_capacity);
+  if (capacity < 256)
+    capacity = 256;
+  visited_set_init(&ctx->visited_set, capacity);
+
   ctx->distances = (float *)sqlite3_malloc(max_candidates * (int)sizeof(float));
   ctx->candidates = (DiskAnnNode **)sqlite3_malloc(max_candidates *
                                                    (int)sizeof(DiskAnnNode *));
@@ -182,11 +314,12 @@ int diskann_search_ctx_init(DiskAnnSearchCtx *ctx, const float *query,
       (DiskAnnNode **)sqlite3_malloc(max_top * (int)sizeof(DiskAnnNode *));
 
   if (ctx->distances && ctx->candidates && ctx->top_distances &&
-      ctx->top_candidates) {
+      ctx->top_candidates && ctx->visited_set.rowids) {
     return DISKANN_OK;
   }
 
   /* Allocation failure — clean up partial allocations */
+  visited_set_deinit(&ctx->visited_set);
   if (ctx->distances)
     sqlite3_free(ctx->distances);
   if (ctx->candidates)
@@ -219,6 +352,9 @@ void diskann_search_ctx_deinit(DiskAnnSearchCtx *ctx) {
     diskann_node_free(node);
     node = next;
   }
+
+  /* Free hash set */
+  visited_set_deinit(&ctx->visited_set);
 
   sqlite3_free(ctx->candidates);
   sqlite3_free(ctx->distances);
@@ -265,7 +401,7 @@ int diskann_select_random_shadow_row(const DiskAnnIndex *idx, uint64_t *rowid) {
 **************************************************************************/
 
 int diskann_search_internal(DiskAnnIndex *idx, DiskAnnSearchCtx *ctx,
-                            uint64_t start_rowid) {
+                            uint64_t start_rowid, BlobCache *cache) {
   DiskAnnNode *start = NULL;
   BlobSpot *reusable_blob = NULL;
   int rc;
@@ -276,15 +412,27 @@ int diskann_search_internal(DiskAnnIndex *idx, DiskAnnSearchCtx *ctx,
     goto out;
   }
 
-  rc = blob_spot_create(idx, &start->blob_spot, start_rowid, idx->block_size,
-                        ctx->blob_mode);
-  if (rc != DISKANN_OK) {
-    goto out;
+  /* Check cache for start node */
+  if (cache) {
+    start->blob_spot = blob_cache_get(cache, start_rowid);
   }
 
-  rc = blob_spot_reload(idx, start->blob_spot, start_rowid, idx->block_size);
-  if (rc != DISKANN_OK) {
-    goto out;
+  if (start->blob_spot == NULL) {
+    rc = blob_spot_create(idx, &start->blob_spot, start_rowid, idx->block_size,
+                          ctx->blob_mode);
+    if (rc != DISKANN_OK) {
+      goto out;
+    }
+
+    rc = blob_spot_reload(idx, start->blob_spot, start_rowid, idx->block_size);
+    if (rc != DISKANN_OK) {
+      goto out;
+    }
+
+    /* Add to cache on miss */
+    if (cache) {
+      blob_cache_put(cache, start_rowid, start->blob_spot);
+    }
   }
 
   const float *start_vec = node_bin_vector(idx, start->blob_spot);
@@ -315,13 +463,23 @@ int diskann_search_internal(DiskAnnIndex *idx, DiskAnnSearchCtx *ctx,
                             idx->block_size);
       candidate_blob = reusable_blob;
     } else {
+      /* Check cache first (WRITABLE mode during insert) */
+      if (cache && candidate->blob_spot == NULL) {
+        candidate->blob_spot = blob_cache_get(cache, candidate->rowid);
+      }
+
       if (candidate->blob_spot == NULL) {
         rc = blob_spot_create(idx, &candidate->blob_spot, candidate->rowid,
                               idx->block_size, ctx->blob_mode);
-      }
-      if (rc == DISKANN_OK) {
-        rc = blob_spot_reload(idx, candidate->blob_spot, candidate->rowid,
-                              idx->block_size);
+        if (rc == DISKANN_OK) {
+          rc = blob_spot_reload(idx, candidate->blob_spot, candidate->rowid,
+                                idx->block_size);
+        }
+
+        /* Add to cache on miss */
+        if (rc == DISKANN_OK && cache) {
+          blob_cache_put(cache, candidate->rowid, candidate->blob_spot);
+        }
       }
       candidate_blob = candidate->blob_spot;
     }
@@ -417,8 +575,8 @@ int diskann_search(DiskAnnIndex *idx, const float *query, uint32_t dims, int k,
   if (rc != DISKANN_OK) {
     return rc;
   }
-  /* Run beam search */
-  rc = diskann_search_internal(idx, &ctx, start_rowid);
+  /* Run beam search (no cache for read-only user queries) */
+  rc = diskann_search_internal(idx, &ctx, start_rowid, NULL);
   if (rc != DISKANN_OK) {
     diskann_search_ctx_deinit(&ctx);
     return rc;
@@ -486,7 +644,7 @@ int diskann_search_filtered(DiskAnnIndex *idx, const float *query,
   ctx.filter_ctx = filter_ctx;
 
   /* Run beam search */
-  rc = diskann_search_internal(idx, &ctx, start_rowid);
+  rc = diskann_search_internal(idx, &ctx, start_rowid, NULL);
   if (rc != DISKANN_OK) {
     diskann_search_ctx_deinit(&ctx);
     return rc;

@@ -20,7 +20,6 @@ function getExtensionPath(platform: string): string {
     win32: "diskann.dll",
   };
 
-  // eslint-disable-next-line security/detect-object-injection
   const ext = extensions[platform] ?? "diskann.so";
   return `./build/${ext}`;
 }
@@ -38,8 +37,7 @@ for (const factory of dbFactories) {
       factory.cleanup?.(db);
     });
 
-    it.skip("loads extension on current platform", () => {
-      // Skip until we have compiled extension binary
+    it("loads extension on current platform", () => {
       const platform = process.platform;
       const extPath = getExtensionPath(platform);
 

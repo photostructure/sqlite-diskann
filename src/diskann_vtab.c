@@ -7,9 +7,9 @@
 ** Wraps the DiskANN C API as a SQLite virtual table.
 ** Supports CREATE, INSERT, SELECT (MATCH search), DELETE, DROP.
 **
-** Schema: CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN, meta1 TYPE,
-*...)
-** First 3 columns HIDDEN. Metadata columns visible in SELECT *.
+** Schema: CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN,
+*search_list_size HIDDEN, meta1 TYPE, ...)
+** First 4 columns HIDDEN. Metadata columns visible in SELECT *.
 ** rowid via xRowid. MATCH on vector col for ANN search.
 **
 ** Usage:
@@ -53,6 +53,7 @@ SQLITE_EXTENSION_INIT1
 #define DISKANN_IDX_LIMIT 0x04
 #define DISKANN_IDX_ROWID 0x08
 #define DISKANN_IDX_FILTER 0x10
+#define DISKANN_IDX_SEARCH_LIST_SIZE 0x20
 
 /* Maximum number of filter constraints in a single query */
 #define DISKANN_MAX_FILTERS 16
@@ -61,7 +62,8 @@ SQLITE_EXTENSION_INIT1
 #define DISKANN_COL_VECTOR 0
 #define DISKANN_COL_DISTANCE 1
 #define DISKANN_COL_K 2
-#define DISKANN_COL_META_START 3 /* First metadata column index */
+#define DISKANN_COL_SEARCH_LIST_SIZE 3
+#define DISKANN_COL_META_START 4 /* First metadata column index */
 
 /* Metadata column definition (parsed from CREATE VIRTUAL TABLE args) */
 typedef struct DiskAnnMetaCol {
@@ -148,7 +150,9 @@ static void free_meta_cols(DiskAnnMetaCol *cols, int n) {
 static int is_reserved_column_name(const char *name) {
   return sqlite3_stricmp(name, "vector") == 0 ||
          sqlite3_stricmp(name, "distance") == 0 ||
-         sqlite3_stricmp(name, "k") == 0 || sqlite3_stricmp(name, "rowid") == 0;
+         sqlite3_stricmp(name, "k") == 0 ||
+         sqlite3_stricmp(name, "search_list_size") == 0 ||
+         sqlite3_stricmp(name, "rowid") == 0;
 }
 
 /*
@@ -284,8 +288,8 @@ static int vtab_init(sqlite3 *db, const char *db_name, const char *table_name,
 
   /* Build dynamic declare_vtab schema string */
   sqlite3_str *s = sqlite3_str_new(db);
-  sqlite3_str_appendall(
-      s, "CREATE TABLE x(vector HIDDEN, distance HIDDEN, k HIDDEN");
+  sqlite3_str_appendall(s, "CREATE TABLE x(vector HIDDEN, distance HIDDEN, k "
+                           "HIDDEN, search_list_size HIDDEN");
   for (int i = 0; i < n_meta_cols; i++) {
     sqlite3_str_appendf(s, ", \"%w\" %s", meta_cols[i].name, meta_cols[i].type);
   }
@@ -352,7 +356,8 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
   config.max_neighbors = 64;
   config.search_list_size = 100;
   config.insert_list_size = 200;
-  config.block_size = 4096;
+  config.block_size =
+      0; /* Auto-calculate based on dimensions and max_neighbors */
 
   if (argc < 3) {
     *pzErr = sqlite3_mprintf("diskann: missing arguments");
@@ -706,10 +711,11 @@ static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
 
   /* Pass 1: Find constraint positions.
   ** SQLite presents constraints in arbitrary order, but xFilter reads argv
-  ** in a fixed order (MATCH, K, LIMIT, ROWID, then filters). We must assign
-  ** argvIndex values that match xFilter's consumption order, not constraint
-  ** array order. Record positions first, assign in pass 2. */
-  int i_match = -1, i_k = -1, i_limit = -1, i_rowid = -1;
+  ** in a fixed order (MATCH, K, SEARCH_LIST_SIZE, LIMIT, ROWID, then filters).
+  ** We must assign argvIndex values that match xFilter's consumption order, not
+  ** constraint array order. Record positions first, assign in pass 2. */
+  int i_match = -1, i_k = -1, i_search_list_size = -1, i_limit = -1,
+      i_rowid = -1;
 
   /* Filter constraints on metadata columns */
   int n_filters = 0;
@@ -730,6 +736,10 @@ static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
                c->iColumn == DISKANN_COL_K) {
       i_k = i;
       idxNum |= DISKANN_IDX_K;
+    } else if (c->op == SQLITE_INDEX_CONSTRAINT_EQ &&
+               c->iColumn == DISKANN_COL_SEARCH_LIST_SIZE) {
+      i_search_list_size = i;
+      idxNum |= DISKANN_IDX_SEARCH_LIST_SIZE;
     } else if (c->op == SQLITE_INDEX_CONSTRAINT_LIMIT) {
       i_limit = i;
       idxNum |= DISKANN_IDX_LIMIT;
@@ -753,7 +763,8 @@ static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
   }
 
   /* Pass 2: Assign argvIndex in the order xFilter consumes them.
-  ** Order: MATCH, K, LIMIT, ROWID, then filter constraints. */
+  ** Order: MATCH, K, SEARCH_LIST_SIZE, LIMIT, ROWID, then filter constraints.
+  */
   int next_argv = 1;
   if (i_match >= 0) {
     pInfo->aConstraintUsage[i_match].argvIndex = next_argv++;
@@ -762,6 +773,10 @@ static int diskannBestIndex(sqlite3_vtab *pVtab, sqlite3_index_info *pInfo) {
   if (i_k >= 0) {
     pInfo->aConstraintUsage[i_k].argvIndex = next_argv++;
     pInfo->aConstraintUsage[i_k].omit = 1;
+  }
+  if (i_search_list_size >= 0) {
+    pInfo->aConstraintUsage[i_search_list_size].argvIndex = next_argv++;
+    pInfo->aConstraintUsage[i_search_list_size].omit = 1;
   }
   if (i_limit >= 0) {
     pInfo->aConstraintUsage[i_limit].argvIndex = next_argv++;
@@ -874,6 +889,17 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
         k = 10;
       next++;
     }
+
+    /* Override search beam width if specified */
+    uint32_t saved_search_list_size = pVtab->idx->search_list_size;
+    if (idxNum & DISKANN_IDX_SEARCH_LIST_SIZE) {
+      int search_list_size = sqlite3_value_int(argv[next]);
+      if (search_list_size > 0) {
+        pVtab->idx->search_list_size = (uint32_t)search_list_size;
+      }
+      next++;
+    }
+
     if (idxNum & DISKANN_IDX_LIMIT) {
       int limit = sqlite3_value_int(argv[next]);
       if (limit > 0 && limit < k)
@@ -887,12 +913,17 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
 
     if (!query || query_dims == 0) {
       pCur->num_results = 0;
+      /* Restore original search_list_size */
+      pVtab->idx->search_list_size = saved_search_list_size;
       return SQLITE_OK;
     }
 
     pCur->results = sqlite3_malloc(k * (int)sizeof(DiskAnnResult));
-    if (!pCur->results)
+    if (!pCur->results) {
+      /* Restore original search_list_size */
+      pVtab->idx->search_list_size = saved_search_list_size;
       return SQLITE_NOMEM;
+    }
 
     int rc;
     if (idxNum & DISKANN_IDX_FILTER) {
@@ -988,6 +1019,9 @@ static int diskannFilter(sqlite3_vtab_cursor *pCursor, int idxNum,
       rc = diskann_search(pVtab->idx, query, query_dims, k, pCur->results);
     }
 
+    /* Restore original search_list_size */
+    pVtab->idx->search_list_size = saved_search_list_size;
+
     if (rc < 0) {
       sqlite3_free(pCur->results);
       pCur->results = NULL;
@@ -1064,8 +1098,14 @@ prepare_meta_stmt:
         sqlite3_prepare_v2(pVtab->db, meta_sql, -1, &pCur->meta_stmt, NULL);
     sqlite3_free(meta_sql);
     if (mrc != SQLITE_OK) {
+      /* Metadata query failed - return error instead of silently returning
+       * NULLs */
+      const char *err = sqlite3_errmsg(pVtab->db);
+      pVtab->base.zErrMsg = sqlite3_mprintf(
+          "Failed to prepare metadata query for table %s: %s (code %d)",
+          pVtab->table_name, err, mrc);
       pCur->meta_stmt = NULL;
-      /* Non-fatal: metadata fetch will return NULLs */
+      return mrc;
     }
   }
   return SQLITE_OK;
@@ -1109,6 +1149,8 @@ static int diskannColumn(sqlite3_vtab_cursor *pCursor, sqlite3_context *ctx,
     sqlite3_result_double(ctx, (double)pCur->results[pCur->current].distance);
     break;
   case DISKANN_COL_K:
+  case DISKANN_COL_SEARCH_LIST_SIZE:
+    /* Both K and SEARCH_LIST_SIZE are write-only (used in xFilter) */
     sqlite3_result_null(ctx);
     break;
   default: {
@@ -1159,7 +1201,9 @@ static int diskannRowid(sqlite3_vtab_cursor *pCursor, sqlite_int64 *pRowid) {
 ** xUpdate — INSERT, DELETE handler.
 **
 ** INSERT: argv[0]=NULL, argv[1]=rowid, argv[2]=vector, argv[3]=distance(NULL),
-**         argv[4]=k(NULL), argv[5+i]=metadata[i]. argc = 2 + 3 + n_meta_cols.
+**         argv[4]=k(NULL), argv[5]=search_list_size(NULL),
+*argv[6+i]=metadata[i].
+**         argc = 2 + 4 + n_meta_cols.
 ** DELETE: argv[0]=rowid. argc = 1.
 */
 static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
@@ -1219,8 +1263,9 @@ static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
       return SQLITE_ERROR;
     }
 
-    /* argv[3]=distance(NULL), argv[4]=k(NULL) — skip
-    ** argv[5+i] = metadata column i */
+    /* argv[3]=distance(NULL), argv[4]=k(NULL), argv[5]=search_list_size(NULL) —
+     *skip
+     ** argv[6+i] = metadata column i */
     int rc = diskann_insert(p->idx, rowid, vec, dims);
     if (rc != DISKANN_OK) {
       pVtab->zErrMsg = sqlite3_mprintf("diskann: insert failed (rc=%d)", rc);
@@ -1256,8 +1301,9 @@ static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
 
       sqlite3_bind_int64(ins_stmt, 1, rowid);
       for (int mi = 0; mi < p->n_meta_cols; mi++) {
-        /* argv[5+mi] = metadata column mi (after rowid, vector, distance, k) */
-        sqlite3_bind_value(ins_stmt, 2 + mi, argv[5 + mi]);
+        /* argv[6+mi] = metadata column mi (after rowid, vector, distance, k,
+         * search_list_size) */
+        sqlite3_bind_value(ins_stmt, 2 + mi, argv[6 + mi]);
       }
 
       rc = sqlite3_step(ins_stmt);

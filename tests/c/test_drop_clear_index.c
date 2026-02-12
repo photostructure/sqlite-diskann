@@ -19,7 +19,7 @@ static sqlite3 *create_test_db_with_index(const char *index_name) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
 
   rc = diskann_create_index(db, "main", index_name, &config);
   if (rc != DISKANN_OK) {

@@ -224,6 +224,27 @@ extern void test_vtab_filter_ne(void);
 extern void test_vtab_filter_recall(void);
 extern void test_vtab_filter_graph_bridge(void);
 
+/* Hash set tests (build speed optimization) */
+extern void test_visited_set_init(void);
+extern void test_visited_set_add_contains(void);
+extern void test_visited_set_collisions(void);
+extern void test_visited_set_wraparound(void);
+extern void test_visited_set_duplicates(void);
+extern void test_visited_set_full_table(void);
+extern void test_visited_set_null_safety(void);
+
+/* BLOB cache tests (build speed optimization) */
+extern void test_cache_init_deinit(void);
+extern void test_cache_put_get_hit(void);
+extern void test_cache_put_get_miss(void);
+extern void test_cache_eviction_lru(void);
+extern void test_cache_hit_promotes(void);
+extern void test_cache_stats(void);
+extern void test_cache_null_safety(void);
+extern void test_cache_put_null_blob(void);
+extern void test_cache_put_duplicate(void);
+extern void test_cache_large_capacity(void);
+
 void setUp(void) { /* Global setup if needed */ }
 
 void tearDown(void) { /* Global teardown if needed */ }
@@ -457,6 +478,27 @@ int main(void) {
   RUN_TEST(test_vtab_filter_ne);
   RUN_TEST(test_vtab_filter_recall);
   RUN_TEST(test_vtab_filter_graph_bridge);
+
+  /* Hash set tests (build speed optimization) */
+  RUN_TEST(test_visited_set_init);
+  RUN_TEST(test_visited_set_add_contains);
+  RUN_TEST(test_visited_set_collisions);
+  RUN_TEST(test_visited_set_wraparound);
+  RUN_TEST(test_visited_set_duplicates);
+  RUN_TEST(test_visited_set_full_table);
+  RUN_TEST(test_visited_set_null_safety);
+
+  /* BLOB cache tests (build speed optimization) */
+  RUN_TEST(test_cache_init_deinit);
+  RUN_TEST(test_cache_put_get_hit);
+  RUN_TEST(test_cache_put_get_miss);
+  RUN_TEST(test_cache_eviction_lru);
+  RUN_TEST(test_cache_hit_promotes);
+  RUN_TEST(test_cache_stats);
+  RUN_TEST(test_cache_null_safety);
+  RUN_TEST(test_cache_put_null_blob);
+  RUN_TEST(test_cache_put_duplicate);
+  RUN_TEST(test_cache_large_capacity);
 
   return UNITY_END();
 }

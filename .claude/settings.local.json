@@ -5,7 +5,25 @@
       "Bash(make clean:*)",
       "Bash(make test)",
       "Bash(make asan:*)",
-      "Bash(make valgrind:*)"
+      "Bash(make valgrind:*)",
+      "Bash(gh run view:*)",
+      "Bash(make:*)",
+      "Bash(./build/test_stress:*)",
+      "Bash(./build/test_stress_quick:*)",
+      "Bash(ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./build/test_stress_quick:*)",
+      "Bash(gcc:*)",
+      "Bash(npx vitest run:*)",
+      "Bash(nm -D:*)",
+      "Bash(nm:*)",
+      "Bash(objdump:*)",
+      "Bash(ldd:*)",
+      "WebFetch(domain:crates.io)",
+      "Bash(readelf:*)",
+      "Bash(clang-tidy:*)",
+      "Bash(gh run list:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(tee:*)",
+      "Bash(./build/test_runner:*)"
     ]
   }
 }

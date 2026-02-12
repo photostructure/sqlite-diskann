@@ -922,7 +922,7 @@ static void create_filter_index(sqlite3 **out_db, DiskAnnIndex **out_idx) {
                           .max_neighbors = 32,
                           .search_list_size = 100,
                           .insert_list_size = 200,
-                          .block_size = 4096};
+                          .block_size = 0};
   rc = diskann_create_index(db, "main", "idx", &config);
   TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
 
