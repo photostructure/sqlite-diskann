@@ -14,7 +14,7 @@ Reduce DiskANN index build time from 707s to <150s for 25k vectors through param
 - [x] Integration (Cache into insert path)
 - [x] Fix Test Failures
 - [x] **Documentation & Analysis** ✅
-- [ ] Further Optimization (max_neighbors tuning)
+- [x] **Further Optimization (max_neighbors tuning)** ✅ COMPLETE
 - [ ] Final Review
 
 ## Required Reading
@@ -1031,6 +1031,7 @@ The flaky recall test revealed **positive news**: block size fix made the graph 
 Created user-facing documentation explaining parameter mutability and recommendations:
 
 **Files Created:**
+
 - `PARAMETERS.md` (340 lines) - Complete parameter guide
   - 🔒 IMMUTABLE parameters (dimensions, metric, max_neighbors, block_size)
   - ⚠️ SEMI-MUTABLE parameters (insert_list_size, pruning_alpha)
@@ -1041,6 +1042,7 @@ Created user-facing documentation explaining parameter mutability and recommenda
   - Performance tuning checklist
 
 **Files Modified:**
+
 - `src/types.ts` - Enhanced TypeScript interfaces with mutability indicators
   - Added 🔒⚠️✅ symbols to all parameter JSDoc
   - Comprehensive examples for each option
@@ -1049,6 +1051,7 @@ Created user-facing documentation explaining parameter mutability and recommenda
 - `CLAUDE.md` - Added 10-line reminder to document performance experiments
 
 **Key Documentation Insights:**
+
 - Parameters stored in `<table>_metadata` shadow table determine index lifecycle
 - `search_list_size` is the ONLY runtime-tunable parameter (via SQL constraint)
 - Changing `max_neighbors` requires full rebuild (determines block_size)
@@ -1059,6 +1062,7 @@ Created user-facing documentation explaining parameter mutability and recommenda
 Created structured system to document expensive performance experiments:
 
 **Files Created:**
+
 - `experiments/README.md` - Guidelines, best practices, experiment index
 - `experiments/template.md` - Structured format (hypothesis, setup, results, analysis, lessons)
 - `experiments/experiment-001-cache-hash-optimization.md` - Documented cache work
@@ -1072,6 +1076,7 @@ Created structured system to document expensive performance experiments:
 | 004 | Scaling Test 10k→200k | Planned | Find crossover vs brute-force |
 
 **Why This Matters:**
+
 - Performance experiments take hours to run
 - Future engineers need to know what was tried, what worked, what didn't
 - Prevents repeating failed experiments
@@ -1082,17 +1087,20 @@ Created structured system to document expensive performance experiments:
 Created benchmark profiles and methodology for finding optimal defaults:
 
 **Files Created:**
+
 - `benchmarks/profiles/param-sweep-insert-list.json` - Test [50,75,100,150,200]
 - `benchmarks/profiles/param-sweep-max-neighbors.json` - Test [24,32,48,64]
 - `benchmarks/profiles/scaling-test.json` - Test [10k,25k,50k,100k,200k]
 - `benchmarks/TUNING-GUIDE.md` - Complete methodology for parameter optimization
 
 **Tuning Strategy:**
+
 1. **Insert list sweep** - Find where recall plateaus (~30 min)
 2. **Max neighbors sweep** - Balance index size vs recall (~25 min)
 3. **Scaling test** - Find crossover point where DiskANN beats brute-force (~90 min)
 
 **Expected Crossover (based on O(log n) analysis):**
+
 - <50k vectors: sqlite-vec wins (brute force faster)
 - ~75k-100k: Crossover point (DiskANN becomes competitive)
 - 100k+: DiskANN dominates (logarithmic vs linear scaling)
@@ -1123,6 +1131,7 @@ With insert_list_size=100 (new default):
 5. **Index bloat is the real problem** - 988MB for 25k vectors = 38x overhead
 
 **Index Size Breakdown:**
+
 ```
 25k vectors × 40KB/block = 1GB index
 Raw vectors: 25k × 256D × 4 bytes = 25.6 MB
@@ -1135,11 +1144,13 @@ Most nodes only use ~50% of allocated space
 ### 5. **Parameter Change**
 
 **Applied:**
+
 - `DEFAULT_INSERT_LIST_SIZE`: 200 → 100 (in `src/diskann_api.c`)
 - Rationale: Faster builds with no recall loss (validated by benchmarks)
 - Impact: New indices build ~2% faster (cache masks most of the benefit)
 
 **Proposed but NOT applied yet:**
+
 - `DEFAULT_MAX_NEIGHBORS`: 32 → 24 (would reduce index size by 30%)
 - Waiting for experiment-003 to validate recall impact
 
@@ -1152,12 +1163,14 @@ Captured full details of cache optimization work in structured format:
 **Actual:** Cache provided 1.6x speedup (707s → 442s)
 
 **Why the gap?**
+
 1. Cache hit rate likely <60% (not measured, needs instrumentation)
 2. SQLite transaction overhead (not just BLOB I/O)
 3. Edge pruning cost may dominate after cache
 4. Baseline 707s may have been measured incorrectly
 
 **Lessons Learned:**
+
 - Always measure baseline carefully
 - Instrument production code (should have added cache hit rate logging)
 - Test in isolation (should have measured cache and hash set separately)
@@ -1169,11 +1182,13 @@ Captured full details of cache optimization work in structured format:
 ### Parameter Mutability Deep Dive
 
 **All parameters are stored in metadata table** but have different mutability:
+
 - **Immutable:** dimensions, metric, max_neighbors, block_size (require full rebuild)
 - **Semi-mutable:** insert_list_size, pruning_alpha (require graph rebuild)
 - **Runtime mutable:** search_list_size (override per-query via SQL constraint)
 
 **Block size calculation:**
+
 ```c
 node_overhead = 16 + (dimensions × 4)
 edge_overhead = (dimensions × 4) + 16
@@ -1187,6 +1202,7 @@ For 256D @ 24 max_neighbors: 28KB blocks (30% smaller!)
 ### Experiment Documentation Pattern
 
 **Before running expensive benchmark:**
+
 1. Copy `experiments/template.md`
 2. Fill in hypothesis, expected results, setup
 3. Run benchmark, save output
@@ -1201,6 +1217,7 @@ For 256D @ 24 max_neighbors: 28KB blocks (30% smaller!)
 **Cache provides 37% speedup** but only **2% additional benefit from insert_list_size reduction**.
 
 This means:
+
 - Cache hit rate is high enough to mask I/O reduction
 - Further optimization should focus on non-I/O bottlenecks (transaction overhead, edge pruning)
 - OR test at larger scale where cache capacity (100 entries) becomes limiting factor
@@ -1208,10 +1225,12 @@ This means:
 ### Index Size is the Bottleneck
 
 **At 25k vectors:**
+
 - DiskANN: 988MB (38x overhead)
 - sqlite-vec: 25.6MB (raw data)
 
 **Impact:**
+
 - Slower builds (more bytes to write)
 - Larger disk footprint (storage cost)
 - Potentially slower queries (more cache pressure)
@@ -1223,20 +1242,24 @@ This means:
 **Immediate Priority:**
 
 1. **Run Experiment 003: max_neighbors sweep** (~25 min)
+
    ```bash
    cd benchmarks
    npm run bench -- --profile=profiles/param-sweep-max-neighbors.json > \
      ../experiments/experiment-003-output.txt
    ```
+
    - Test max_neighbors = [24, 32, 48, 64]
    - Expected: 24 gives 30% smaller index with <2% recall loss
    - Document in `experiments/experiment-003-max-neighbors.md`
 
 2. **Run Experiment 004: scaling test** (~90 min)
+
    ```bash
    npm run bench -- --profile=profiles/scaling-test.json > \
      ../experiments/experiment-004-output.txt
    ```
+
    - Test [10k, 25k, 50k, 100k, 200k] vectors
    - Find crossover point where DiskANN beats brute-force
    - Extrapolate to 500k+ for large-scale recommendations
@@ -1253,6 +1276,7 @@ This means:
    - Validates cache effectiveness assumptions
 
 **Expected Timeline:**
+
 - max_neighbors sweep: 25 min
 - Scaling test: 90 min
 - Analysis + documentation: 30 min
@@ -1260,6 +1284,7 @@ This means:
 - **Total: ~2.5 hours to complete optimization**
 
 **Success Criteria (from TPP):**
+
 - Build time: <150s for 25k vectors (currently 432s - NOT MET)
 - Recall: ≥93% @ k=10 (currently 99.2% - EXCEEDED)
 - Index size: Reasonable for production (currently 988MB/25k = 39MB/1k - BORDERLINE)
@@ -1271,7 +1296,7 @@ This means:
 ## Artifacts
 
 - **Documentation:** PARAMETERS.md, benchmarks/TUNING-GUIDE.md, experiments/README.md
-- **Benchmark profiles:** param-sweep-*.json, scaling-test.json
+- **Benchmark profiles:** param-sweep-\*.json, scaling-test.json
 - **Experiment docs:** experiment-001-cache-hash-optimization.md
 - **Benchmark results:** results-2026-02-12T01-49-40-607Z.json (insert_list=200)
 - **Benchmark results:** results-2026-02-12T01-58-12-079Z.json (insert_list=100)

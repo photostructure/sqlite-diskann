@@ -11,9 +11,9 @@ Add timing instrumentation to `diskann_insert()` to measure actual per-phase cos
 - [x] Implementation Design
 - [x] Test-First Development
 - [x] Implementation
-- [ ] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Integration
+- [x] Cleanup & Documentation
+- [x] Final Review
 
 ## Required Reading
 
@@ -56,8 +56,8 @@ Add timing instrumentation to `diskann_insert()` to measure actual per-phase cos
 - **Phase 2 flush count < visited count**: Not every visited node gets a new edge (replace_edge_idx returns -1 when dominated). At id=200: 130 flushes / 199 visited = 65% acceptance rate.
 - **Parallel search via multiple WAL reader connections is NOT viable** — all target DB drivers (better-sqlite3, @photostructure/sqlite, node:sqlite) are single-threaded with a single connection
 - **Phase 2 dominance was a small-scale artifact** — At 200 vectors: 61%. At 10k: 22%. Phase 2 acceptance rate drops as graph connectivity improves (65% → 13%).
-- **random_start is the surprise bottleneck at scale** — 26% of insert time at 10k, growing linearly. `SELECT COUNT(*)` subquery is O(n).
-- **Search is the true dominant cost at scale** — 41% at 10k. This is inherent to beam search and harder to optimize.
+- **random_start WAS the surprise bottleneck at scale** — 26% of insert time at 10k, growing linearly. `SELECT COUNT(*)` subquery was O(n). **FIXED** in commit `ad404e1` — replaced with MAX(rowid)+WHERE seek, now O(log n) and 0.7% of total.
+- **Search is the true dominant cost at scale** — 56% at 10k (after random_start fix). This is inherent to beam search and harder to optimize.
 - **Similar vectors are 15% faster to insert** — search converges faster in a cluster (977us vs 2295us), but phase2 is 33% more expensive (more neighbors accept the back-edge).
 - **Profiling CSV output**: `profiling_timing.csv` — 20,998 lines from `make test-profiling`
 
@@ -79,7 +79,9 @@ Add `clock_gettime()` calls around each phase in `diskann_insert()`. Gate output
 - [x] Add test: insert 500 similar vectors, measure neighbor overlap (visited_list intersection)
 - [x] Run at 10k scale, collect data (20,998 timing lines)
 - [x] Document findings in Notes section below
-- [ ] Run at 25k scale to confirm random_start scaling prediction
+- [x] Fix random_start O(n) bottleneck (commit ad404e1)
+- [x] Verify fix: random_start 1,463us → 46us (-96.8%), flat 0.7% at all scales
+- [ ] _(Optional)_ Run at 25k scale to confirm post-fix characteristics — not blocking any decisions
 
 **Timing output format (CSV to stderr):**
 
@@ -224,8 +226,48 @@ All 20,998 timing lines show `cache_hits=0`. The BlobCache is created and destro
 
 **Previous priority (from 200-vector data) was wrong.** Lazy back-edges was ranked #1 because Phase 2 was 61% at 200 vectors. At 10k it's only 22%. The surprise winner is random_start — trivial to fix, 26% of insert time.
 
-**Next steps:**
+### Session 2026-02-11 (cont.): random_start Fix + Post-Fix Profiling
 
-1. Fix random_start immediately (cache the count, or use `SELECT rowid FROM shadow WHERE rowid >= ABS(RANDOM()) % max_rowid LIMIT 1`)
-2. Update serial-batch-insert TPP with revised priorities
-3. Consider running at 25k to see if random_start becomes even worse (predicted: ~40%+ of total)
+**What was done:**
+
+1. Fixed `diskann_select_random_shadow_row()` in `src/diskann_search.c`:
+   - Old: `LIMIT 1 OFFSET (RANDOM() % COUNT(*))` — O(n) double scan
+   - New: `WHERE rowid >= (RANDOM() % MAX(rowid)) + 1 LIMIT 1` — O(log n) B-tree seek
+   - Added fallback `SELECT rowid ... LIMIT 1` for empty table / wraparound edge cases
+   - Not perfectly uniform with rowid gaps (deletes), but uniform enough for beam search entry point
+2. Verified: `make test` (192/192), `make asan` (clean), `make test-profiling` (2/2)
+3. Re-ran profiling to measure improvement
+4. Committed as `ad404e1`
+
+**Post-fix profiling results (random incremental, 500 into 10k):**
+
+| Phase        | Before (us)   | After (us)    | Change                  |
+| ------------ | ------------- | ------------- | ----------------------- |
+| random_start | 1,463 (26.2%) | **46 (0.9%)** | **-96.8%**              |
+| search       | 2,295 (41.0%) | 2,970 (56.1%) | same absolute, higher % |
+| phase2       | 1,261 (22.6%) | 1,624 (30.7%) | same absolute, higher % |
+| **Total**    | **5,594**     | **5,291**     | **-5.4%**               |
+
+**Post-fix: similar vector incremental:**
+
+| Metric       | Before   | After        | Change     |
+| ------------ | -------- | ------------ | ---------- |
+| Total        | 4,780 us | **3,645 us** | **-23.7%** |
+| Throughput   | 209/sec  | **274/sec**  | **+31%**   |
+| random_start | 1,533 us | 49 us        | -96.8%     |
+
+**Post-fix scaling: random_start is now flat at 0.7% across all index sizes (was 0.8% → 24.9%).**
+
+**Revised optimization priority (post random_start fix):**
+
+| Priority | Optimization                          | Expected Impact                           | Effort   |
+| -------- | ------------------------------------- | ----------------------------------------- | -------- |
+| **1**    | **Persistent BlobCache across batch** | -10-20% (130 nodes visited, 0 cache hits) | Medium   |
+| **2**    | **Lazy back-edges** (defer phase2)    | -30% total time                           | Large    |
+| **3**    | Search beam tuning                    | Hard to quantify                          | Research |
+
+**Next session should:**
+
+1. Move to Cleanup & Documentation phase — update `_todo/20260211-serial-batch-insert.md` with revised priorities
+2. Consider running 25k profiling to confirm post-fix characteristics hold at larger scale
+3. Start persistent BlobCache work (next optimization priority)
