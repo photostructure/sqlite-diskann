@@ -245,6 +245,22 @@ extern void test_cache_put_null_blob(void);
 extern void test_cache_put_duplicate(void);
 extern void test_cache_large_capacity(void);
 
+/* BLOB cache owning mode tests (persistent batch cache) */
+extern void test_cache_owning_put_sets_flag(void);
+extern void test_cache_owning_eviction_clears_flag(void);
+extern void test_cache_owning_deinit_frees(void);
+extern void test_cache_non_owning_no_flag(void);
+
+/* Batch insert tests */
+extern void test_batch_begin_end(void);
+extern void test_batch_begin_null(void);
+extern void test_batch_end_null(void);
+extern void test_batch_double_begin(void);
+extern void test_batch_end_without_begin(void);
+extern void test_batch_insert_basic(void);
+extern void test_batch_insert_recall(void);
+extern void test_batch_insert_after_end(void);
+
 void setUp(void) { /* Global setup if needed */ }
 
 void tearDown(void) { /* Global teardown if needed */ }
@@ -499,6 +515,22 @@ int main(void) {
   RUN_TEST(test_cache_put_null_blob);
   RUN_TEST(test_cache_put_duplicate);
   RUN_TEST(test_cache_large_capacity);
+
+  /* BLOB cache owning mode tests (persistent batch cache) */
+  RUN_TEST(test_cache_owning_put_sets_flag);
+  RUN_TEST(test_cache_owning_eviction_clears_flag);
+  RUN_TEST(test_cache_owning_deinit_frees);
+  RUN_TEST(test_cache_non_owning_no_flag);
+
+  /* Batch insert tests */
+  RUN_TEST(test_batch_begin_end);
+  RUN_TEST(test_batch_begin_null);
+  RUN_TEST(test_batch_end_null);
+  RUN_TEST(test_batch_double_begin);
+  RUN_TEST(test_batch_end_without_begin);
+  RUN_TEST(test_batch_insert_basic);
+  RUN_TEST(test_batch_insert_recall);
+  RUN_TEST(test_batch_insert_after_end);
 
   return UNITY_END();
 }

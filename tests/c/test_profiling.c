@@ -55,7 +55,7 @@
 #define PROF_INSERT_L 128
 
 /* Base index size — how many vectors to build before profiling */
-#define PROF_BASE_SIZE 10000
+#define PROF_BASE_SIZE 25000
 
 /* Number of incremental inserts to profile */
 #define PROF_INCREMENTAL_COUNT 500

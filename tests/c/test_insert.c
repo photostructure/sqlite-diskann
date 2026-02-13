@@ -430,6 +430,232 @@ void test_insert_delete_search(void) {
 ** Cosine metric insertion
 **************************************************************************/
 
+/**************************************************************************
+** Batch insert tests
+**************************************************************************/
+
+void test_batch_begin_end(void) {
+  sqlite3 *db = open_db();
+  DiskAnnConfig cfg = {.dimensions = TEST_DIMS,
+                       .metric = DISKANN_METRIC_EUCLIDEAN,
+                       .max_neighbors = 8,
+                       .search_list_size = 20,
+                       .insert_list_size = 30,
+                       .block_size = 0};
+  DiskAnnIndex *idx = create_and_open(db, "test_batch_be", &cfg);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  /* Begin and end without any inserts — should succeed */
+  int rc = diskann_begin_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  rc = diskann_end_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_batch_begin_null(void) {
+  int rc = diskann_begin_batch(NULL);
+  TEST_ASSERT_EQUAL_INT(DISKANN_ERROR_INVALID, rc);
+}
+
+void test_batch_end_null(void) {
+  int rc = diskann_end_batch(NULL);
+  TEST_ASSERT_EQUAL_INT(DISKANN_ERROR_INVALID, rc);
+}
+
+void test_batch_double_begin(void) {
+  sqlite3 *db = open_db();
+  DiskAnnConfig cfg = {.dimensions = TEST_DIMS,
+                       .metric = DISKANN_METRIC_EUCLIDEAN,
+                       .max_neighbors = 8,
+                       .search_list_size = 20,
+                       .insert_list_size = 30,
+                       .block_size = 0};
+  DiskAnnIndex *idx = create_and_open(db, "test_batch_dbl", &cfg);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  int rc = diskann_begin_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  /* Second begin should fail — already in batch mode */
+  rc = diskann_begin_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_ERROR_INVALID, rc);
+
+  rc = diskann_end_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_batch_end_without_begin(void) {
+  sqlite3 *db = open_db();
+  DiskAnnConfig cfg = {.dimensions = TEST_DIMS,
+                       .metric = DISKANN_METRIC_EUCLIDEAN,
+                       .max_neighbors = 8,
+                       .search_list_size = 20,
+                       .insert_list_size = 30,
+                       .block_size = 0};
+  DiskAnnIndex *idx = create_and_open(db, "test_batch_nob", &cfg);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  /* End without begin should fail */
+  int rc = diskann_end_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_ERROR_INVALID, rc);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_batch_insert_basic(void) {
+  sqlite3 *db = open_db();
+  DiskAnnConfig cfg = {.dimensions = TEST_DIMS,
+                       .metric = DISKANN_METRIC_EUCLIDEAN,
+                       .max_neighbors = 8,
+                       .search_list_size = 20,
+                       .insert_list_size = 30,
+                       .block_size = 0};
+  DiskAnnIndex *idx = create_and_open(db, "test_batch_ins", &cfg);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  int rc = diskann_begin_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  /* Insert 10 vectors */
+  for (int i = 1; i <= 10; i++) {
+    float vec[] = {(float)i, 0.0f, 0.0f};
+    rc = diskann_insert(idx, (int64_t)i, vec, TEST_DIMS);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(DISKANN_OK, rc, "batch insert failed");
+  }
+
+  rc = diskann_end_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  /* Verify all 10 rows exist */
+  TEST_ASSERT_EQUAL_INT(10, count_shadow_rows(db, "test_batch_ins"));
+
+  /* Verify searchable after batch ends */
+  float query[] = {5.0f, 0.0f, 0.0f};
+  DiskAnnResult results[3];
+  int n = diskann_search(idx, query, TEST_DIMS, 3, results);
+  TEST_ASSERT_TRUE(n >= 1);
+  TEST_ASSERT_EQUAL_INT64(5, results[0].id);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_batch_insert_recall(void) {
+  sqlite3 *db = open_db();
+  DiskAnnConfig cfg = {.dimensions = TEST_DIMS,
+                       .metric = DISKANN_METRIC_EUCLIDEAN,
+                       .max_neighbors = 8,
+                       .search_list_size = 30,
+                       .insert_list_size = 40,
+                       .block_size = 0};
+  DiskAnnIndex *idx = create_and_open(db, "test_batch_rec", &cfg);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  /* Insert 50 random vectors via batch */
+  int n_vectors = 50;
+  float vectors[50][3];
+  srand(42);
+  for (int i = 0; i < n_vectors; i++) {
+    vectors[i][0] = (float)rand() / (float)RAND_MAX;
+    vectors[i][1] = (float)rand() / (float)RAND_MAX;
+    vectors[i][2] = (float)rand() / (float)RAND_MAX;
+  }
+
+  int rc = diskann_begin_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  for (int i = 0; i < n_vectors; i++) {
+    rc = diskann_insert(idx, (int64_t)(i + 1), vectors[i], TEST_DIMS);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(DISKANN_OK, rc, "batch insert failed");
+  }
+
+  rc = diskann_end_batch(idx);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  /* Brute-force reference top-5 */
+  float query[] = {0.5f, 0.5f, 0.5f};
+  int k = 5;
+  typedef struct {
+    int64_t id;
+    float dist;
+  } BFResult;
+  BFResult bf[50];
+  for (int i = 0; i < n_vectors; i++) {
+    bf[i].id = (int64_t)(i + 1);
+    bf[i].dist = diskann_distance_l2(query, vectors[i], TEST_DIMS);
+  }
+  for (int i = 0; i < k; i++) {
+    for (int j = i + 1; j < n_vectors; j++) {
+      if (bf[j].dist < bf[i].dist) {
+        BFResult tmp = bf[i];
+        bf[i] = bf[j];
+        bf[j] = tmp;
+      }
+    }
+  }
+
+  /* ANN search */
+  DiskAnnResult results[5];
+  int n = diskann_search(idx, query, TEST_DIMS, k, results);
+  TEST_ASSERT_TRUE(n >= k);
+
+  /* Compute recall — batch insert should match non-batch recall */
+  int hits = 0;
+  for (int i = 0; i < k; i++) {
+    for (int j = 0; j < n; j++) {
+      if (bf[i].id == results[j].id) {
+        hits++;
+        break;
+      }
+    }
+  }
+
+  float recall = (float)hits / (float)k;
+  TEST_ASSERT_TRUE_MESSAGE(recall >= 0.6f,
+                           "batch recall too low (expected >= 60%)");
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_batch_insert_after_end(void) {
+  sqlite3 *db = open_db();
+  DiskAnnConfig cfg = {.dimensions = TEST_DIMS,
+                       .metric = DISKANN_METRIC_EUCLIDEAN,
+                       .max_neighbors = 8,
+                       .search_list_size = 20,
+                       .insert_list_size = 30,
+                       .block_size = 0};
+  DiskAnnIndex *idx = create_and_open(db, "test_batch_aft", &cfg);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  /* Batch insert 5 vectors */
+  diskann_begin_batch(idx);
+  for (int i = 1; i <= 5; i++) {
+    float vec[] = {(float)i, 0.0f, 0.0f};
+    diskann_insert(idx, (int64_t)i, vec, TEST_DIMS);
+  }
+  diskann_end_batch(idx);
+
+  /* Non-batch insert after batch ends — should work */
+  float vec6[] = {6.0f, 0.0f, 0.0f};
+  int rc = diskann_insert(idx, 6, vec6, TEST_DIMS);
+  TEST_ASSERT_EQUAL_INT(DISKANN_OK, rc);
+
+  TEST_ASSERT_EQUAL_INT(6, count_shadow_rows(db, "test_batch_aft"));
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
 void test_insert_cosine_metric(void) {
   sqlite3 *db = open_db();
   DiskAnnConfig cfg = {.dimensions = TEST_DIMS,

@@ -151,6 +151,10 @@ BlobSpot *blob_cache_get(BlobCache *cache, uint64_t rowid) {
 /*
 ** Find free slot index or allocate one by evicting LRU entry.
 ** Returns index to use, always valid.
+**
+** In owning mode (owns_blobs=1), clears is_cached on the evicted BlobSpot
+** so the DiskAnnNode that may still reference it will free it during
+** search context teardown.
 */
 static int get_free_slot(BlobCache *cache) {
   assert(cache);
@@ -163,6 +167,12 @@ static int get_free_slot(BlobCache *cache) {
   /* Cache is full - evict tail (LRU) */
   assert(cache->tail != -1);
   int idx = cache->tail;
+
+  /* In owning mode, release ownership of the evicted BlobSpot */
+  if (cache->owns_blobs && cache->slots[idx] != NULL) {
+    cache->slots[idx]->is_cached = 0;
+  }
+
   remove_from_chain(cache, idx);
   cache->count--; /* Will be re-incremented in put */
   return idx;
@@ -182,6 +192,9 @@ void blob_cache_put(BlobCache *cache, uint64_t rowid, BlobSpot *spot) {
   if (idx != -1) {
     /* Update existing entry */
     cache->slots[idx] = spot;
+    if (cache->owns_blobs && spot) {
+      spot->is_cached = 1;
+    }
     promote_to_head(cache, idx);
     return;
   }
@@ -194,18 +207,38 @@ void blob_cache_put(BlobCache *cache, uint64_t rowid, BlobSpot *spot) {
   cache->rowids[idx] = rowid;
   cache->count++;
 
+  /* In owning mode, mark the BlobSpot as cache-owned */
+  if (cache->owns_blobs && spot) {
+    spot->is_cached = 1;
+  }
+
   insert_at_head(cache, idx);
 }
 
 /*
 ** Free cache resources.
+**
+** In owning mode (owns_blobs=1), frees all BlobSpots still in the cache.
+** In non-owning mode, BlobSpots are NOT freed (caller owns them).
 */
 void blob_cache_deinit(BlobCache *cache) {
   if (!cache) {
     return;
   }
 
-  /* Free arrays (does NOT free BlobSpots - caller owns them) */
+  /* In owning mode, free all BlobSpots still in the cache */
+  if (cache->owns_blobs && cache->slots) {
+    for (int idx = cache->head; idx != -1;) {
+      int next = cache->next[idx];
+      if (cache->slots[idx] != NULL) {
+        blob_spot_free(cache->slots[idx]);
+        cache->slots[idx] = NULL;
+      }
+      idx = next;
+    }
+  }
+
+  /* Free arrays */
   if (cache->slots) {
     sqlite3_free(cache->slots);
     cache->slots = NULL;

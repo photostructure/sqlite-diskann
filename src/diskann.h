@@ -187,6 +187,36 @@ int diskann_search_filtered(DiskAnnIndex *idx, const float *query,
                             DiskAnnFilterFn filter_fn, void *filter_ctx);
 
 /*
+** Begin batch mode for multiple inserts.
+**
+** Creates a persistent BlobCache that is shared across inserts. Reduces
+** redundant BLOB I/O when nodes are visited by multiple consecutive inserts.
+**
+** Parameters:
+**   idx - Index handle (must not be NULL, must not already be in batch mode)
+**
+** Returns:
+**   DISKANN_OK on success
+**   DISKANN_ERROR_INVALID if idx is NULL or already in batch mode
+**   DISKANN_ERROR_NOMEM if cache allocation fails
+**
+** Caller must call diskann_end_batch() when done inserting.
+*/
+int diskann_begin_batch(DiskAnnIndex *idx);
+
+/*
+** End batch mode and free the persistent cache.
+**
+** Parameters:
+**   idx - Index handle (must not be NULL, must be in batch mode)
+**
+** Returns:
+**   DISKANN_OK on success
+**   DISKANN_ERROR_INVALID if idx is NULL or not in batch mode
+*/
+int diskann_end_batch(DiskAnnIndex *idx);
+
+/*
 ** Delete a vector from the index.
 **
 ** Parameters:

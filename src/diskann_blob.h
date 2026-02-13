@@ -39,6 +39,7 @@ typedef struct BlobSpot {
   int is_writable;      /* 1 if opened for writing, 0 for reading */
   int is_initialized;   /* 1 if buffer contains valid data */
   int is_aborted;       /* 1 if BLOB operations have been aborted */
+  int is_cached; /* 1 if owned by an owning BlobCache (do not free via node) */
 } BlobSpot;
 
 /*

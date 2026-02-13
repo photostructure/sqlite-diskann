@@ -8,6 +8,7 @@
 */
 #include "diskann.h"
 #include "diskann_blob.h"
+#include "diskann_cache.h"
 #include "diskann_internal.h"
 #include "diskann_node.h"
 #include "diskann_util.h"
@@ -477,6 +478,13 @@ void diskann_close_index(DiskAnnIndex *idx) {
     return; /* Safe to call with NULL */
   }
 
+  /* Clean up batch cache if still active */
+  if (idx->batch_cache) {
+    blob_cache_deinit(idx->batch_cache);
+    sqlite3_free(idx->batch_cache);
+    idx->batch_cache = NULL;
+  }
+
   /* Free malloc'd strings */
   if (idx->db_name) {
     sqlite3_free(idx->db_name);
@@ -497,6 +505,47 @@ void diskann_close_index(DiskAnnIndex *idx) {
 
   /* Free the index structure itself */
   free(idx);
+}
+
+int diskann_begin_batch(DiskAnnIndex *idx) {
+  if (!idx) {
+    return DISKANN_ERROR_INVALID;
+  }
+  if (idx->batch_cache != NULL) {
+    return DISKANN_ERROR_INVALID; /* Already in batch mode */
+  }
+
+  /* Allocate batch cache on heap (persists across inserts) */
+  BlobCache *cache = (BlobCache *)sqlite3_malloc(sizeof(BlobCache));
+  if (!cache) {
+    return DISKANN_ERROR_NOMEM;
+  }
+
+  int rc = blob_cache_init(cache, 200);
+  if (rc != DISKANN_OK) {
+    sqlite3_free(cache);
+    return rc;
+  }
+  cache->owns_blobs = 1; /* Cache owns BlobSpots in batch mode */
+
+  idx->batch_cache = cache;
+  return DISKANN_OK;
+}
+
+int diskann_end_batch(DiskAnnIndex *idx) {
+  if (!idx) {
+    return DISKANN_ERROR_INVALID;
+  }
+  if (idx->batch_cache == NULL) {
+    return DISKANN_ERROR_INVALID; /* Not in batch mode */
+  }
+
+  /* Free cache (frees all owned BlobSpots in owning mode) */
+  blob_cache_deinit(idx->batch_cache);
+  sqlite3_free(idx->batch_cache);
+  idx->batch_cache = NULL;
+
+  return DISKANN_OK;
 }
 
 /*

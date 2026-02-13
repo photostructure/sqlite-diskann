@@ -50,6 +50,9 @@ temp/
 *.db-shm
 *.db-wal
 
+# Profiling output
+profiling_timing.csv
+
 # From clangd
 compile_commands.events.json
 # From bear

@@ -214,6 +214,7 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   DiskAnnSearchCtx ctx = {0};
   BlobSpot *new_blob = NULL;
   BlobCache cache = {0};
+  BlobCache *active_cache = NULL; /* Points to batch_cache or &cache */
   int cache_initialized = 0;
   char *savepoint_sql = NULL;
   uint64_t start_rowid = 0;
@@ -280,12 +281,19 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
 
   /* Search for neighbors (skip if first node) */
   if (!first) {
-    /* Initialize cache (capacity 100 = ~8MB memory overhead) */
-    rc = blob_cache_init(&cache, 100);
-    if (rc != DISKANN_OK) {
-      goto out;
+    /* Use batch cache if in batch mode, otherwise create per-insert cache */
+    if (idx->batch_cache) {
+      /* Batch mode: use persistent cache (shared across inserts) */
+      active_cache = idx->batch_cache;
+    } else {
+      /* Per-insert cache (capacity 100 = ~8MB memory overhead) */
+      rc = blob_cache_init(&cache, 100);
+      if (rc != DISKANN_OK) {
+        goto out;
+      }
+      cache_initialized = 1;
+      active_cache = &cache;
     }
-    cache_initialized = 1;
 
     rc = diskann_search_ctx_init(&ctx, vector, (int)idx->insert_list_size, 1,
                                  DISKANN_BLOB_WRITABLE);
@@ -295,7 +303,7 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
     }
     ctx_valid = 1;
 
-    rc = diskann_search_internal(idx, &ctx, start_rowid, &cache);
+    rc = diskann_search_internal(idx, &ctx, start_rowid, active_cache);
 
     if (rc != DISKANN_OK) {
       goto out;
@@ -399,6 +407,13 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   if (rc != DISKANN_OK) {
     goto out;
   }
+
+  /* In batch mode, cache the new node's BlobSpot for future inserts */
+  if (idx->batch_cache && new_blob) {
+    blob_cache_put(idx->batch_cache, (uint64_t)id, new_blob);
+    new_blob = NULL; /* Cache now owns it */
+  }
+
   if (timing) {
     clock_gettime(CLOCK_MONOTONIC, &t_flush_new);
   }
@@ -453,7 +468,8 @@ out:
         elapsed_us(&t_savepoint, &t_search), elapsed_us(&t_search, &t_shadow),
         elapsed_us(&t_shadow, &t_phase1), elapsed_us(&t_phase1, &t_phase2),
         elapsed_us(&t_phase2, &t_flush_new), elapsed_us(&t_flush_new, &t_exit),
-        cache.hits, cache.misses, visited_count, phase2_flushes);
+        active_cache ? active_cache->hits : 0,
+        active_cache ? active_cache->misses : 0, visited_count, phase2_flushes);
   }
 
   return rc;

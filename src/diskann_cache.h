@@ -11,8 +11,10 @@
 ** Design:
 ** - Simple LRU eviction with doubly-linked list (array-based, not pointers)
 ** - Linear search for get (100 entries = ~10 cache lines, fast enough)
-** - Cache lifetime: single insert operation (no stale data across inserts)
-** - Cache does NOT own BlobSpots (caller creates, caller frees)
+** - Two ownership modes controlled by owns_blobs flag:
+**   owns_blobs=0: Non-owning (per-insert). Cache holds borrowed pointers.
+**   owns_blobs=1: Owning (batch). Cache owns BlobSpots, sets is_cached flag,
+**                 frees on eviction/deinit. Used by diskann_begin_batch().
 */
 #ifndef DISKANN_CACHE_H
 #define DISKANN_CACHE_H
@@ -29,7 +31,9 @@ extern "C" {
 **
 ** Memory ownership:
 ** - slots, rowids, next, prev: owned by cache (freed in deinit)
-** - BlobSpot instances: NOT owned by cache (caller manages)
+** - BlobSpot instances: depends on owns_blobs flag
+**   owns_blobs=0: NOT owned (caller manages)
+**   owns_blobs=1: owned (freed on eviction and in deinit)
 **
 ** LRU implementation:
 ** - head: most recently used (MRU)
@@ -48,6 +52,7 @@ typedef struct BlobCache {
   int tail;         /* Index of LRU entry (-1 if empty) */
   int hits;         /* Cache hit counter */
   int misses;       /* Cache miss counter */
+  int owns_blobs;   /* 1 = cache owns BlobSpots (frees on evict/deinit) */
 } BlobCache;
 
 /*

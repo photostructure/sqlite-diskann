@@ -16,6 +16,10 @@
 #include "diskann_sqlite.h"
 #include <stdint.h>
 
+/* Forward declaration to avoid circular include:
+** diskann_cache.h → diskann_blob.h → diskann_internal.h */
+typedef struct BlobCache BlobCache;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,6 +55,9 @@ struct DiskAnnIndex {
   /* Statistics (for debugging/profiling) */
   uint64_t num_reads;  /* Number of BLOB reads */
   uint64_t num_writes; /* Number of BLOB writes */
+
+  /* Batch mode: persistent cache across multiple inserts */
+  BlobCache *batch_cache; /* NULL when not in batch mode */
 };
 
 /*

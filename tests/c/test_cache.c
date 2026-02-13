@@ -305,3 +305,108 @@ void test_cache_large_capacity(void) {
 
   blob_cache_deinit(&cache);
 }
+
+/**************************************************************************
+** Test 11: Owning cache — put sets is_cached flag
+**************************************************************************/
+
+void test_cache_owning_put_sets_flag(void) {
+  BlobCache cache;
+  blob_cache_init(&cache, 10);
+  cache.owns_blobs = 1; /* Enable owning mode */
+
+  /* Allocate a real BlobSpot-sized block (not a mock — we need is_cached) */
+  BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
+  TEST_ASSERT_NOT_NULL(spot);
+  memset(spot, 0, sizeof(BlobSpot));
+  TEST_ASSERT_EQUAL(0, spot->is_cached);
+
+  /* Put into owning cache — should set is_cached */
+  blob_cache_put(&cache, 1, spot);
+  TEST_ASSERT_EQUAL(1, spot->is_cached);
+
+  blob_cache_deinit(&cache);
+  /* In owning mode, deinit frees BlobSpots — spot is now freed.
+   * Valgrind will verify no leaks and no double-free. */
+}
+
+/**************************************************************************
+** Test 12: Owning cache — eviction clears is_cached flag
+**************************************************************************/
+
+void test_cache_owning_eviction_clears_flag(void) {
+  BlobCache cache;
+  blob_cache_init(&cache, 3); /* Tiny capacity */
+  cache.owns_blobs = 1;
+
+  /* Allocate 4 BlobSpots */
+  BlobSpot *spots[4];
+  for (int i = 0; i < 4; i++) {
+    spots[i] = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
+    TEST_ASSERT_NOT_NULL(spots[i]);
+    memset(spots[i], 0, sizeof(BlobSpot));
+  }
+
+  /* Fill cache (capacity 3) */
+  blob_cache_put(&cache, 1, spots[0]);
+  blob_cache_put(&cache, 2, spots[1]);
+  blob_cache_put(&cache, 3, spots[2]);
+  TEST_ASSERT_EQUAL(1, spots[0]->is_cached);
+  TEST_ASSERT_EQUAL(1, spots[1]->is_cached);
+  TEST_ASSERT_EQUAL(1, spots[2]->is_cached);
+
+  /* Put 4th entry — should evict LRU (rowid=1, spots[0]) */
+  blob_cache_put(&cache, 4, spots[3]);
+  TEST_ASSERT_EQUAL(0, spots[0]->is_cached); /* Evicted — flag cleared */
+  TEST_ASSERT_EQUAL(1, spots[3]->is_cached); /* New entry — flag set */
+
+  /* Clean up: spots[0] was evicted (is_cached=0), must be freed by caller */
+  sqlite3_free(spots[0]);
+  /* spots[1], spots[2], spots[3] are in cache — deinit frees them */
+  blob_cache_deinit(&cache);
+}
+
+/**************************************************************************
+** Test 13: Owning cache — deinit frees all remaining BlobSpots
+**************************************************************************/
+
+void test_cache_owning_deinit_frees(void) {
+  BlobCache cache;
+  blob_cache_init(&cache, 10);
+  cache.owns_blobs = 1;
+
+  /* Allocate and insert 5 BlobSpots */
+  for (int i = 0; i < 5; i++) {
+    BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
+    TEST_ASSERT_NOT_NULL(spot);
+    memset(spot, 0, sizeof(BlobSpot));
+    blob_cache_put(&cache, (uint64_t)(i + 1), spot);
+  }
+
+  TEST_ASSERT_EQUAL(5, cache.count);
+
+  /* Deinit should free all 5 BlobSpots */
+  blob_cache_deinit(&cache);
+  /* Valgrind will verify no leaks */
+}
+
+/**************************************************************************
+** Test 14: Non-owning cache — put does NOT set is_cached flag
+**************************************************************************/
+
+void test_cache_non_owning_no_flag(void) {
+  BlobCache cache;
+  blob_cache_init(&cache, 10);
+  /* owns_blobs defaults to 0 (non-owning) */
+
+  BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
+  TEST_ASSERT_NOT_NULL(spot);
+  memset(spot, 0, sizeof(BlobSpot));
+
+  blob_cache_put(&cache, 1, spot);
+  TEST_ASSERT_EQUAL(0, spot->is_cached); /* Non-owning: flag stays 0 */
+
+  blob_cache_deinit(&cache);
+  /* Non-owning cache doesn't free BlobSpots — caller must */
+  sqlite3_free(spot);
+}
