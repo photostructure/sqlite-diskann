@@ -9,6 +9,11 @@ import type { BenchmarkConfig, BenchmarkResult, SearchStats } from "./config.js"
 import { loadDataset, randomSample } from "./dataset.js";
 import { loadOrComputeGroundTruth } from "./ground-truth.js";
 import { computeRecallAtK, computeStats } from "./metrics.js";
+import {
+  createConfigForParams,
+  formatParamLabel,
+  generateDiskAnnParamCombinations,
+} from "./param-sweep.js";
 import type { BenchmarkRunner } from "./runners/base.js";
 import { DiskAnnRunner } from "./runners/diskann-runner.js";
 import { VecRunner } from "./runners/vec-runner.js";
@@ -79,101 +84,112 @@ export async function runBenchmark(
 
   // 4. Run benchmarks for each library
   for (const libConfig of config.libraries) {
-    console.log(`\n=== Benchmarking ${libConfig.name} ===\n`);
+    // For DiskANN, run once per parameter combination
+    const paramCombos =
+      libConfig.name === "diskann" ? generateDiskAnnParamCombinations(config) : [null];
 
-    const runner = createRunner(libConfig.name);
+    for (const params of paramCombos) {
+      const label = params
+        ? `${libConfig.name} (${formatParamLabel(params)})`
+        : libConfig.name;
 
-    try {
-      await runner.setup(config);
+      console.log(`\n=== Benchmarking ${label} ===\n`);
 
-      // Build index
-      console.log(`Building index...`);
-      const { buildTime, indexSize } = await runner.buildIndex(vectors, dim);
-      console.log(
-        `  Build time: ${(buildTime / 1000).toFixed(1)}s, Index size: ${(indexSize / 1024 / 1024).toFixed(1)} MB\n`
-      );
+      const runConfig = params ? createConfigForParams(config, params) : config;
+      const runner = createRunner(libConfig.name);
 
-      // Warmup
-      if (config.metrics.warmupQueries > 0) {
-        console.log(`Warming up with ${config.metrics.warmupQueries} queries...`);
-        for (let i = 0; i < config.metrics.warmupQueries; i++) {
-          const queryVec = queryVectors[i % queryVectors.length];
-          await runner.search(queryVec, config.queries.k[0]);
+      try {
+        await runner.setup(runConfig);
+
+        // Build index
+        console.log(`Building index...`);
+        const { buildTime, indexSize } = await runner.buildIndex(vectors, dim);
+        console.log(
+          `  Build time: ${(buildTime / 1000).toFixed(1)}s, Index size: ${(indexSize / 1024 / 1024).toFixed(1)} MB\n`
+        );
+
+        // Warmup
+        if (config.metrics.warmupQueries > 0) {
+          console.log(`Warming up with ${config.metrics.warmupQueries} queries...`);
+          for (let i = 0; i < config.metrics.warmupQueries; i++) {
+            const queryVec = queryVectors[i % queryVectors.length];
+            await runner.search(queryVec, config.queries.k[0]);
+          }
+          console.log(`Warmup complete\n`);
         }
-        console.log(`Warmup complete\n`);
-      }
 
-      // Run searches for each k
-      const searchStats: SearchStats[] = [];
+        // Run searches for each k
+        const searchStats: SearchStats[] = [];
 
-      for (const k of config.queries.k) {
-        console.log(`Running searches (k=${k})...`);
+        for (const k of config.queries.k) {
+          console.log(`Running searches (k=${k})...`);
 
-        const latencies: number[] = [];
-        const recalls: number[] = [];
+          const latencies: number[] = [];
+          const recalls: number[] = [];
 
-        for (let i = 0; i < queryVectors.length; i++) {
-          // eslint-disable-next-line security/detect-object-injection
-          const queryVec = queryVectors[i];
-
-          const { ids, latency } = await runner.search(queryVec, k);
-          latencies.push(latency);
-
-          // Compute recall if ground truth available
-          if (groundTruth) {
+          for (let i = 0; i < queryVectors.length; i++) {
             // eslint-disable-next-line security/detect-object-injection
-            const gtIds = groundTruth.neighbors[i].slice(0, k);
-            const recall = computeRecallAtK(ids, gtIds);
-            recalls.push(recall);
+            const queryVec = queryVectors[i];
 
-            // Debug: log first query results
-            if (i === 0 && k === 10) {
-              console.log(`\n[DEBUG] Query 0, k=${k}:`);
-              console.log(`  Ground truth IDs:`, gtIds.slice(0, 10));
-              console.log(`  DiskANN IDs:`, ids.slice(0, 10));
-              console.log(`  Recall:`, recall);
+            const { ids, latency } = await runner.search(queryVec, k);
+            latencies.push(latency);
+
+            // Compute recall if ground truth available
+            if (groundTruth) {
+              // eslint-disable-next-line security/detect-object-injection
+              const gtIds = groundTruth.neighbors[i].slice(0, k);
+              const recall = computeRecallAtK(ids, gtIds);
+              recalls.push(recall);
+
+              // Debug: log first query results
+              if (i === 0 && k === 10) {
+                console.log(`\n[DEBUG] Query 0, k=${k}:`);
+                console.log(`  Ground truth IDs:`, gtIds.slice(0, 10));
+                console.log(`  DiskANN IDs:`, ids.slice(0, 10));
+                console.log(`  Recall:`, recall);
+              }
             }
           }
+
+          // Compute statistics
+          const stats = computeStats(latencies);
+          const totalTime = latencies.reduce((a, b) => a + b, 0);
+          const qps = (1000 * queryVectors.length) / totalTime;
+          const avgRecall =
+            recalls.length > 0
+              ? recalls.reduce((a, b) => a + b) / recalls.length
+              : undefined;
+
+          searchStats.push({
+            k,
+            totalQueries: queryVectors.length,
+            totalTime,
+            latencyP50: stats.p50,
+            latencyP95: stats.p95,
+            latencyP99: stats.p99,
+            qps,
+            recall: avgRecall,
+          });
+
+          console.log(
+            `  QPS: ${qps.toFixed(0)}, p50: ${stats.p50.toFixed(2)}ms, Recall: ${avgRecall ? (avgRecall * 100).toFixed(1) + "%" : "N/A"}\n`
+          );
         }
 
-        // Compute statistics
-        const stats = computeStats(latencies);
-        const totalTime = latencies.reduce((a, b) => a + b, 0);
-        const qps = (1000 * queryVectors.length) / totalTime;
-        const avgRecall =
-          recalls.length > 0
-            ? recalls.reduce((a, b) => a + b) / recalls.length
-            : undefined;
-
-        searchStats.push({
-          k,
-          totalQueries: queryVectors.length,
-          totalTime,
-          latencyP50: stats.p50,
-          latencyP95: stats.p95,
-          latencyP99: stats.p99,
-          qps,
-          recall: avgRecall,
+        // Collect results
+        results.push({
+          config: runConfig,
+          library: runner.name,
+          params: params ? { ...params } : (libConfig.params ?? {}),
+          buildTime,
+          indexSize,
+          search: searchStats,
         });
-
-        console.log(
-          `  QPS: ${qps.toFixed(0)}, p50: ${stats.p50.toFixed(2)}ms, Recall: ${avgRecall ? (avgRecall * 100).toFixed(1) + "%" : "N/A"}\n`
-        );
+      } finally {
+        await runner.cleanup();
       }
-
-      // Collect results
-      results.push({
-        config,
-        library: runner.name,
-        params: libConfig.params ?? {},
-        buildTime,
-        indexSize,
-        search: searchStats,
-      });
-    } finally {
-      await runner.cleanup();
-    }
-  }
+    } // End of parameter combination loop
+  } // End of library loop
 
   return results;
 }

@@ -43,7 +43,23 @@ export async function loadOrComputeGroundTruth(
   if (cachePath && existsSync(cachePath)) {
     try {
       const json = readFileSync(cachePath, "utf-8");
-      return JSON.parse(json) as GroundTruth;
+      const cached = JSON.parse(json) as GroundTruth;
+
+      // Validate cache matches current parameters
+      const queriesMatch =
+        cached.queries.length === queryIndices.length &&
+        cached.queries.every((q, i) => q === queryIndices[i]);
+      const cachedK = cached.neighbors[0]?.length ?? 0;
+      const kSufficient = cachedK >= k;
+
+      if (queriesMatch && kSufficient) {
+        return cached;
+      }
+
+      console.warn(
+        `Ground truth cache stale (queries: ${cached.queries.length} vs ${queryIndices.length}, ` +
+          `cached k: ${cachedK} vs requested k: ${k}), recomputing...`
+      );
     } catch (error) {
       console.warn(`Failed to load ground truth from ${cachePath}:`, error);
       // Fall through to compute
@@ -53,12 +69,27 @@ export async function loadOrComputeGroundTruth(
   // Compute ground truth (always uses L2 distance via sqlite-vec)
   const groundTruth = await computeGroundTruth(vectors, dim, queryIndices, k);
 
-  // Save to cache
+  // Save to cache only if no existing cache has more data
   if (cachePath) {
-    try {
-      writeFileSync(cachePath, JSON.stringify(groundTruth, null, 2));
-    } catch (error) {
-      console.warn(`Failed to save ground truth to ${cachePath}:`, error);
+    let shouldSave = true;
+    if (existsSync(cachePath)) {
+      try {
+        const existing = JSON.parse(readFileSync(cachePath, "utf-8")) as GroundTruth;
+        const existingK = existing.neighbors[0]?.length ?? 0;
+        // Don't overwrite a cache with more queries or higher k
+        if (existing.queries.length > queryIndices.length || existingK > k) {
+          shouldSave = false;
+        }
+      } catch {
+        // If we can't read existing, overwrite is fine
+      }
+    }
+    if (shouldSave) {
+      try {
+        writeFileSync(cachePath, JSON.stringify(groundTruth, null, 2));
+      } catch (error) {
+        console.warn(`Failed to save ground truth to ${cachePath}:`, error);
+      }
     }
   }
 
