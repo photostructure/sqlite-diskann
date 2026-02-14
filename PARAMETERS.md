@@ -35,7 +35,7 @@ These parameters determine the physical storage layout and cannot be changed wit
 #### `max_neighbors` (uint32)
 
 - **What:** Maximum edges per node in the graph
-- **Default:** 64
+- **Default:** 32
 - **Why immutable:** Determines block size via formula:
   ```
   node_overhead = 16 + (dimensions × 4)
@@ -114,12 +114,12 @@ These parameters control search behavior and can be overridden without rebuildin
 #### `search_list_size` (uint32)
 
 - **What:** Beam width during search (how many candidates to explore per query)
-- **Default:** 100
+- **Default:** 100 (with automatic scaling — see below)
 - **Stored in:** Metadata table (but can be overridden)
 - **How to override:**
 
   ```sql
-  -- Use default (100)
+  -- Use auto-scaled default
   SELECT rowid, distance FROM vectors WHERE vector MATCH ? AND k = 10;
 
   -- Override to 300 for higher recall
@@ -127,15 +127,16 @@ These parameters control search behavior and can be overridden without rebuildin
   WHERE vector MATCH ? AND k = 10 AND search_list_size = 300;
   ```
 
-- **Recommended values:**
-  - Fast queries: 50-100
-  - Balanced: 100-200
-  - High recall: 200-500
-  - Maximum recall: 500-1000
+- **Automatic scaling:** The effective beam width is `max(configured_default, sqrt(index_size))`. This ensures recall stays high as the index grows, without requiring manual tuning. For example:
+  - 10k vectors: `max(100, 100)` = 100
+  - 25k vectors: `max(100, 158)` = 158
+  - 100k vectors: `max(100, 316)` = 316
+  - 1M vectors: `max(100, 1000)` = 1000
+- **Per-query overrides** also benefit from auto-scaling: the effective beam is `max(your_override, sqrt(n))`, so low values are automatically raised. To force a specific beam width, set it above `sqrt(n)`.
 - **Trade-offs:**
   - Higher = better recall, slower queries
   - Lower = faster queries, lower recall
-- **Rule of thumb:** `search_list_size ≥ k × 2` for good recall
+- **Rule of thumb:** Auto-scaling handles most cases. Override only if you need faster queries and can tolerate lower recall.
 - **Performance impact:** Linear with beam width (2x beam = ~2x query time)
 
 ## Parameter Selection Guide
