@@ -32,6 +32,7 @@
 #endif
 
 #include "diskann.h"
+#include "diskann_cache.h"
 #include "diskann_internal.h"
 #include "diskann_sqlite.h"
 #include "diskann_util.h"
@@ -116,6 +117,10 @@ static int diskannColumn(sqlite3_vtab_cursor *pCursor, sqlite3_context *ctx,
 static int diskannRowid(sqlite3_vtab_cursor *pCursor, sqlite_int64 *pRowid);
 static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
                          sqlite_int64 *pRowid);
+static int diskannBegin(sqlite3_vtab *pVtab);
+static int diskannSync(sqlite3_vtab *pVtab);
+static int diskannCommit(sqlite3_vtab *pVtab);
+static int diskannRollback(sqlite3_vtab *pVtab);
 static int diskannShadowName(const char *zName);
 
 /*
@@ -1314,6 +1319,12 @@ static int diskannUpdate(sqlite3_vtab *pVtab, int argc, sqlite3_value **argv,
       }
     }
 
+    /* Release cached blob handles so they don't block COMMIT.
+    ** Buffer data is preserved; handles reopen lazily on next access. */
+    if (p->idx->batch_cache) {
+      blob_cache_release_handles(p->idx->batch_cache);
+    }
+
     *pRowid = rowid;
     return SQLITE_OK;
   }
@@ -1334,6 +1345,66 @@ static int diskannShadowName(const char *zName) {
 }
 
 /*
+** xBegin — activate persistent cache for write transactions.
+**
+** Creates a BlobCache that persists across all inserts in this transaction,
+** reducing redundant BLOB I/O. Deferred back-edges (lazy edges) are disabled
+** in the vtab path — they degrade recall at small scale and require 10k+
+** scale validation (pending block size fix). The C API begin_batch/end_batch
+** still provides full lazy back-edge support for explicit batch use.
+*/
+static int diskannBegin(sqlite3_vtab *pVtab) {
+  diskann_vtab *p = (diskann_vtab *)pVtab;
+  /* Cache-only batch mode (no deferred edges) — lazy edges degrade recall
+  ** at small scale and the vtab path has no way to control batch size. */
+  int rc = diskann_begin_batch(p->idx, 0);
+  if (rc != DISKANN_OK) {
+    pVtab->zErrMsg = sqlite3_mprintf("diskann: begin_batch failed (rc=%d)", rc);
+    return SQLITE_ERROR;
+  }
+  return SQLITE_OK;
+}
+
+/*
+** xSync — free batch cache and apply any deferred edges.
+** Called before xCommit. With lazy edges disabled (vtab path), this just
+** frees the persistent BlobCache.
+*/
+static int diskannSync(sqlite3_vtab *pVtab) {
+  diskann_vtab *p = (diskann_vtab *)pVtab;
+  if (!p->idx->batch_cache) {
+    return SQLITE_OK; /* Not in batch mode (shouldn't happen) */
+  }
+  int rc = diskann_end_batch(p->idx);
+  if (rc != DISKANN_OK) {
+    pVtab->zErrMsg = sqlite3_mprintf("diskann: batch sync failed (rc=%d)", rc);
+    return SQLITE_ERROR;
+  }
+  return SQLITE_OK;
+}
+
+/*
+** xCommit — batch state already cleaned up by xSync.
+*/
+static int diskannCommit(sqlite3_vtab *pVtab) {
+  (void)pVtab;
+  return SQLITE_OK;
+}
+
+/*
+** xRollback — discard deferred edges without applying.
+** Shadow table changes are being rolled back by SQLite, so deferred
+** edges referencing those rows must NOT be applied.
+*/
+static int diskannRollback(sqlite3_vtab *pVtab) {
+  diskann_vtab *p = (diskann_vtab *)pVtab;
+  if (p->idx->batch_cache) {
+    diskann_abort_batch(p->idx);
+  }
+  return SQLITE_OK;
+}
+
+/*
 ** Virtual table module definition (iVersion=3 for xShadowName)
 */
 static sqlite3_module diskannModule = {
@@ -1351,10 +1422,10 @@ static sqlite3_module diskannModule = {
     diskannColumn,     /* xColumn */
     diskannRowid,      /* xRowid */
     diskannUpdate,     /* xUpdate */
-    NULL,              /* xBegin */
-    NULL,              /* xSync */
-    NULL,              /* xCommit */
-    NULL,              /* xRollback */
+    diskannBegin,      /* xBegin — activate batch mode */
+    diskannSync,       /* xSync — apply deferred edges */
+    diskannCommit,     /* xCommit — no-op (cleaned up by xSync) */
+    diskannRollback,   /* xRollback — discard deferred edges */
     NULL,              /* xFindFunction */
     NULL,              /* xRename */
     NULL,              /* xSavepoint */

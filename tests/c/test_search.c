@@ -878,4 +878,78 @@ void test_visited_set_null_safety(void) {
   TEST_ASSERT(1);
 }
 
+/**************************************************************************
+** Dynamic search list size scaling tests
+**************************************************************************/
+
+/* Exposed via TESTING ifdef */
+extern int effective_search_list_size(DiskAnnIndex *idx);
+
+void test_effective_search_list_size_small_index(void) {
+  /* Small index (few rows) should use configured default */
+  sqlite3 *db;
+  TEST_ASSERT_EQUAL(SQLITE_OK, sqlite3_open(":memory:", &db));
+
+  DiskAnnIndex *idx = create_test_index(db, "test_sls_small", 0);
+  TEST_ASSERT_NOT_NULL(idx);
+
+  /* Empty index: should return configured value */
+  int sls = effective_search_list_size(idx);
+  TEST_ASSERT_EQUAL(TEST_SEARCH_L, sls);
+
+  /* Insert a few rows via diskann_insert */
+  float vec[TEST_DIMS] = {1.0f, 0.0f, 0.0f};
+  for (int i = 0; i < 5; i++) {
+    vec[0] = (float)i;
+    int rc = diskann_insert(idx, i + 1, vec, TEST_DIMS);
+    TEST_ASSERT_EQUAL(DISKANN_OK, rc);
+  }
+
+  /* 5 rows: sqrt(5) ≈ 2, well below configured 32, should use configured */
+  sls = effective_search_list_size(idx);
+  TEST_ASSERT_EQUAL(TEST_SEARCH_L, sls);
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
+void test_effective_search_list_size_scales_up(void) {
+  /* Large index should scale search list size up */
+  sqlite3 *db;
+  TEST_ASSERT_EQUAL(SQLITE_OK, sqlite3_open(":memory:", &db));
+
+  /* Use search_list_size=10 so sqrt(n) overtakes it quickly */
+  DiskAnnConfig config = {.dimensions = TEST_DIMS,
+                          .metric = 0,
+                          .max_neighbors = TEST_MAX_NEIGHBORS,
+                          .search_list_size = 10,
+                          .insert_list_size = TEST_INSERT_L,
+                          .block_size = TEST_BLOCK_SIZE};
+
+  int rc = diskann_create_index(db, "main", "test_sls_scale", &config);
+  TEST_ASSERT_EQUAL(DISKANN_OK, rc);
+
+  DiskAnnIndex *idx = NULL;
+  rc = diskann_open_index(db, "main", "test_sls_scale", &idx);
+  TEST_ASSERT_EQUAL(DISKANN_OK, rc);
+
+  /* Insert 200 rows — sqrt(200) ≈ 14, above configured 10 */
+  float vec[TEST_DIMS];
+  for (int i = 0; i < 200; i++) {
+    vec[0] = (float)(i % 50);
+    vec[1] = (float)(i / 50);
+    vec[2] = 0.0f;
+    rc = diskann_insert(idx, i + 1, vec, TEST_DIMS);
+    TEST_ASSERT_EQUAL(DISKANN_OK, rc);
+  }
+
+  int sls = effective_search_list_size(idx);
+  /* sqrt(200) ≈ 14.1, so effective should be 14 (> configured 10) */
+  TEST_ASSERT_TRUE(sls >= 14);
+  TEST_ASSERT_TRUE(sls > 10); /* Must be above configured */
+
+  diskann_close_index(idx);
+  sqlite3_close(db);
+}
+
 /* main() is in test_runner.c */

@@ -145,6 +145,7 @@ BlobSpot *blob_cache_get(BlobCache *cache, uint64_t rowid) {
 
   cache->hits++;
   promote_to_head(cache, idx);
+  blob_spot_addref(cache->slots[idx]); /* Caller gets a reference */
   return cache->slots[idx];
 }
 
@@ -152,9 +153,9 @@ BlobSpot *blob_cache_get(BlobCache *cache, uint64_t rowid) {
 ** Find free slot index or allocate one by evicting LRU entry.
 ** Returns index to use, always valid.
 **
-** In owning mode (owns_blobs=1), clears is_cached on the evicted BlobSpot
-** so the DiskAnnNode that may still reference it will free it during
-** search context teardown.
+** Releases the cache's refcount reference on eviction. The BlobSpot is
+** freed only if no other references remain (e.g., no DiskAnnNode in an
+** active search context holds a reference).
 */
 static int get_free_slot(BlobCache *cache) {
   assert(cache);
@@ -168,9 +169,10 @@ static int get_free_slot(BlobCache *cache) {
   assert(cache->tail != -1);
   int idx = cache->tail;
 
-  /* In owning mode, release ownership of the evicted BlobSpot */
-  if (cache->owns_blobs && cache->slots[idx] != NULL) {
-    cache->slots[idx]->is_cached = 0;
+  /* Release cache's reference — frees BlobSpot only if last ref */
+  if (cache->slots[idx] != NULL) {
+    blob_spot_free(cache->slots[idx]);
+    cache->slots[idx] = NULL;
   }
 
   remove_from_chain(cache, idx);
@@ -191,15 +193,23 @@ void blob_cache_put(BlobCache *cache, uint64_t rowid, BlobSpot *spot) {
 
   if (idx != -1) {
     /* Update existing entry */
+    if (cache->slots[idx] == spot) {
+      /* Same pointer — no ref change needed, just promote */
+      promote_to_head(cache, idx);
+      return;
+    }
+    if (cache->slots[idx] != NULL) {
+      blob_spot_free(cache->slots[idx]); /* Release old ref */
+    }
     cache->slots[idx] = spot;
-    if (cache->owns_blobs && spot) {
-      spot->is_cached = 1;
+    if (spot) {
+      blob_spot_addref(spot); /* Cache takes a reference */
     }
     promote_to_head(cache, idx);
     return;
   }
 
-  /* Allocate new slot */
+  /* Allocate new slot (may evict LRU, releasing its ref) */
   idx = get_free_slot(cache);
   assert(idx >= 0 && idx < cache->capacity);
 
@@ -207,27 +217,46 @@ void blob_cache_put(BlobCache *cache, uint64_t rowid, BlobSpot *spot) {
   cache->rowids[idx] = rowid;
   cache->count++;
 
-  /* In owning mode, mark the BlobSpot as cache-owned */
-  if (cache->owns_blobs && spot) {
-    spot->is_cached = 1;
+  /* Cache takes a reference */
+  if (spot) {
+    blob_spot_addref(spot);
   }
 
   insert_at_head(cache, idx);
 }
 
 /*
+** Close all blob handles in the cache, preserving buffer data.
+** Marks each BlobSpot as aborted so blob_spot_reload() will reopen.
+*/
+void blob_cache_release_handles(BlobCache *cache) {
+  if (!cache || !cache->slots) {
+    return;
+  }
+
+  for (int idx = cache->head; idx != -1; idx = cache->next[idx]) {
+    BlobSpot *spot = cache->slots[idx];
+    if (spot && spot->pBlob) {
+      sqlite3_blob_close(spot->pBlob);
+      spot->pBlob = NULL;
+      spot->is_aborted = 1;
+    }
+  }
+}
+
+/*
 ** Free cache resources.
 **
-** In owning mode (owns_blobs=1), frees all BlobSpots still in the cache.
-** In non-owning mode, BlobSpots are NOT freed (caller owns them).
+** Releases the cache's refcount reference on each BlobSpot. BlobSpots
+** with no remaining references are freed automatically.
 */
 void blob_cache_deinit(BlobCache *cache) {
   if (!cache) {
     return;
   }
 
-  /* In owning mode, free all BlobSpots still in the cache */
-  if (cache->owns_blobs && cache->slots) {
+  /* Release cache's reference on all BlobSpots */
+  if (cache->slots) {
     for (int idx = cache->head; idx != -1;) {
       int next = cache->next[idx];
       if (cache->slots[idx] != NULL) {

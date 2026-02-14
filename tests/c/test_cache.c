@@ -40,19 +40,17 @@
 **************************************************************************/
 
 /*
-** Mock BlobSpot structure for testing.
-** Cache doesn't own BlobSpots, just holds pointers, so we can use
-** fake structures (just need unique addresses for pointer equality tests).
+** Create a heap-allocated BlobSpot for testing.
+** Uses sqlite3_malloc + memset(0) + refcount=1, matching blob_spot_create.
+** Caller takes one reference (refcount=1). Must be balanced by blob_spot_free.
 */
-typedef struct {
-  uint64_t rowid;
-  int dummy_data;
-} MockBlobSpot;
-
-/* Create mock BlobSpot with given rowid (on stack, not heap) */
-static void init_mock_blob(MockBlobSpot *blob, uint64_t rowid) {
-  blob->rowid = rowid;
-  blob->dummy_data = (int)rowid;
+static BlobSpot *create_mock_blobspot(void) {
+  BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
+  if (spot) {
+    memset(spot, 0, sizeof(BlobSpot));
+    spot->refcount = 1;
+  }
+  return spot;
 }
 
 /**************************************************************************
@@ -83,22 +81,23 @@ void test_cache_put_get_hit(void) {
   BlobCache cache;
   blob_cache_init(&cache, 100);
 
-  /* Create mock BlobSpot */
-  MockBlobSpot mock_blob;
-  init_mock_blob(&mock_blob, 1);
+  BlobSpot *spot = create_mock_blobspot();
+  TEST_ASSERT_NOT_NULL(spot);
 
-  /* Put rowid=1 into cache */
-  blob_cache_put(&cache, 1, (BlobSpot *)&mock_blob);
+  /* Put rowid=1 into cache (addrefs: 1→2) */
+  blob_cache_put(&cache, 1, spot);
   TEST_ASSERT_EQUAL(1, cache.count);
 
-  /* Get rowid=1 — should hit */
+  /* Get rowid=1 — should hit (addrefs: 2→3) */
   BlobSpot *result = blob_cache_get(&cache, 1);
   TEST_ASSERT_NOT_NULL(result);
-  TEST_ASSERT_EQUAL_PTR(&mock_blob, result);
+  TEST_ASSERT_EQUAL_PTR(spot, result);
   TEST_ASSERT_EQUAL(1, cache.hits);
   TEST_ASSERT_EQUAL(0, cache.misses);
 
-  blob_cache_deinit(&cache);
+  blob_spot_free(result);    /* Release get ref (3→2) */
+  blob_cache_deinit(&cache); /* Release cache ref (2→1) */
+  blob_spot_free(spot);      /* Release creator ref (1→0→freed) */
 }
 
 /**************************************************************************
@@ -126,22 +125,24 @@ void test_cache_eviction_lru(void) {
   BlobCache cache;
   blob_cache_init(&cache, 10); /* Small capacity for testing */
 
-  /* Create 15 mock BlobSpots */
-  MockBlobSpot blobs[15];
+  /* Create 15 heap-allocated BlobSpots */
+  BlobSpot *blobs[15];
   for (int i = 0; i < 15; i++) {
-    init_mock_blob(&blobs[i], (uint64_t)(i + 1));
+    blobs[i] = create_mock_blobspot();
+    TEST_ASSERT_NOT_NULL(blobs[i]);
   }
 
-  /* Put 15 entries (capacity is 10, so 5 should be evicted) */
+  /* Put 15 entries (capacity is 10, so first 5 evicted).
+  ** Each put: addrefs (1→2). Eviction: decrefs (2→1). */
   for (int i = 0; i < 15; i++) {
-    blob_cache_put(&cache, (uint64_t)(i + 1), (BlobSpot *)&blobs[i]);
+    blob_cache_put(&cache, (uint64_t)(i + 1), blobs[i]);
   }
 
   TEST_ASSERT_EQUAL(10, cache.count); /* Capped at capacity */
 
   /* First 5 entries (rowids 1-5) should be evicted */
   BlobSpot *result = blob_cache_get(&cache, 1);
-  TEST_ASSERT_NULL(result); /* Evicted */
+  TEST_ASSERT_NULL(result); /* Evicted — no addref for miss */
 
   result = blob_cache_get(&cache, 5);
   TEST_ASSERT_NULL(result); /* Evicted */
@@ -149,13 +150,20 @@ void test_cache_eviction_lru(void) {
   /* Last 10 entries (rowids 6-15) should still be cached */
   result = blob_cache_get(&cache, 6);
   TEST_ASSERT_NOT_NULL(result); /* Still cached */
-  TEST_ASSERT_EQUAL_PTR(&blobs[5], result);
+  TEST_ASSERT_EQUAL_PTR(blobs[5], result);
+  blob_spot_free(result); /* Release get ref */
 
   result = blob_cache_get(&cache, 15);
   TEST_ASSERT_NOT_NULL(result); /* Still cached */
-  TEST_ASSERT_EQUAL_PTR(&blobs[14], result);
+  TEST_ASSERT_EQUAL_PTR(blobs[14], result);
+  blob_spot_free(result); /* Release get ref */
 
-  blob_cache_deinit(&cache);
+  blob_cache_deinit(&cache); /* Release cache refs for 6-15 */
+
+  /* Release all creator refs */
+  for (int i = 0; i < 15; i++) {
+    blob_spot_free(blobs[i]);
+  }
 }
 
 /**************************************************************************
@@ -166,32 +174,40 @@ void test_cache_hit_promotes(void) {
   BlobCache cache;
   blob_cache_init(&cache, 3); /* Tiny capacity */
 
-  MockBlobSpot blobs[4];
+  BlobSpot *blobs[4];
   for (int i = 0; i < 4; i++) {
-    init_mock_blob(&blobs[i], (uint64_t)(i + 1));
+    blobs[i] = create_mock_blobspot();
+    TEST_ASSERT_NOT_NULL(blobs[i]);
   }
 
   /* Put rowids 1, 2, 3 (fills cache) */
-  blob_cache_put(&cache, 1, (BlobSpot *)&blobs[0]);
-  blob_cache_put(&cache, 2, (BlobSpot *)&blobs[1]);
-  blob_cache_put(&cache, 3, (BlobSpot *)&blobs[2]);
+  blob_cache_put(&cache, 1, blobs[0]);
+  blob_cache_put(&cache, 2, blobs[1]);
+  blob_cache_put(&cache, 3, blobs[2]);
 
   /* Get rowid=1 (should promote to head) */
   BlobSpot *result = blob_cache_get(&cache, 1);
   TEST_ASSERT_NOT_NULL(result);
+  blob_spot_free(result); /* Release get ref */
 
   /* Put rowid=4 (should evict 2, not 1, since 1 was promoted) */
-  blob_cache_put(&cache, 4, (BlobSpot *)&blobs[3]);
+  blob_cache_put(&cache, 4, blobs[3]);
 
   /* Verify rowid=1 still cached */
   result = blob_cache_get(&cache, 1);
   TEST_ASSERT_NOT_NULL(result);
+  blob_spot_free(result); /* Release get ref */
 
   /* Verify rowid=2 was evicted */
   result = blob_cache_get(&cache, 2);
   TEST_ASSERT_NULL(result);
 
-  blob_cache_deinit(&cache);
+  blob_cache_deinit(&cache); /* Release cache refs */
+
+  /* Release all creator refs */
+  for (int i = 0; i < 4; i++) {
+    blob_spot_free(blobs[i]);
+  }
 }
 
 /**************************************************************************
@@ -202,25 +218,35 @@ void test_cache_stats(void) {
   BlobCache cache;
   blob_cache_init(&cache, 100);
 
-  MockBlobSpot blobs[5];
+  BlobSpot *blobs[5];
   for (int i = 0; i < 5; i++) {
-    init_mock_blob(&blobs[i], (uint64_t)(i + 1));
-    blob_cache_put(&cache, (uint64_t)(i + 1), (BlobSpot *)&blobs[i]);
+    blobs[i] = create_mock_blobspot();
+    TEST_ASSERT_NOT_NULL(blobs[i]);
+    blob_cache_put(&cache, (uint64_t)(i + 1), blobs[i]);
   }
 
-  /* 3 hits */
-  blob_cache_get(&cache, 1); /* hit */
-  blob_cache_get(&cache, 2); /* hit */
-  blob_cache_get(&cache, 3); /* hit */
+  /* 3 hits — each get addrefs, must decref */
+  BlobSpot *r;
+  r = blob_cache_get(&cache, 1);
+  blob_spot_free(r);
+  r = blob_cache_get(&cache, 2);
+  blob_spot_free(r);
+  r = blob_cache_get(&cache, 3);
+  blob_spot_free(r);
 
-  /* 2 misses */
-  blob_cache_get(&cache, 999);  /* miss */
-  blob_cache_get(&cache, 1000); /* miss */
+  /* 2 misses — return NULL, no ref to manage */
+  blob_cache_get(&cache, 999);
+  blob_cache_get(&cache, 1000);
 
   TEST_ASSERT_EQUAL(3, cache.hits);
   TEST_ASSERT_EQUAL(2, cache.misses);
 
   blob_cache_deinit(&cache);
+
+  /* Release creator refs */
+  for (int i = 0; i < 5; i++) {
+    blob_spot_free(blobs[i]);
+  }
 }
 
 /**************************************************************************
@@ -228,21 +254,22 @@ void test_cache_stats(void) {
 **************************************************************************/
 
 void test_cache_null_safety(void) {
-  MockBlobSpot mock_blob;
-  init_mock_blob(&mock_blob, 1);
+  BlobSpot *spot = create_mock_blobspot();
+  TEST_ASSERT_NOT_NULL(spot);
 
   /* blob_cache_get with NULL cache — should not crash */
   BlobSpot *result = blob_cache_get(NULL, 1);
   TEST_ASSERT_NULL(result);
 
-  /* blob_cache_put with NULL cache — should not crash */
-  blob_cache_put(NULL, 1, (BlobSpot *)&mock_blob);
+  /* blob_cache_put with NULL cache — should not crash (no addref) */
+  blob_cache_put(NULL, 1, spot);
+  TEST_ASSERT_EQUAL(1, spot->refcount); /* Unchanged */
 
   /* blob_cache_deinit with NULL — should not crash */
   blob_cache_deinit(NULL);
 
   /* If we get here without segfault, test passes */
-  TEST_ASSERT(1);
+  blob_spot_free(spot);
 }
 
 /**************************************************************************
@@ -271,24 +298,31 @@ void test_cache_put_duplicate(void) {
   BlobCache cache;
   blob_cache_init(&cache, 100);
 
-  MockBlobSpot blob1, blob2;
-  init_mock_blob(&blob1, 1);
-  init_mock_blob(&blob2, 1);
-  blob2.dummy_data = 999; /* Different data */
+  BlobSpot *spot1 = create_mock_blobspot();
+  BlobSpot *spot2 = create_mock_blobspot();
+  TEST_ASSERT_NOT_NULL(spot1);
+  TEST_ASSERT_NOT_NULL(spot2);
 
-  /* Put rowid=1 first time */
-  blob_cache_put(&cache, 1, (BlobSpot *)&blob1);
+  /* Put rowid=1 first time (spot1: 1→2) */
+  blob_cache_put(&cache, 1, spot1);
   TEST_ASSERT_EQUAL(1, cache.count);
 
-  /* Put rowid=1 again with different pointer */
-  blob_cache_put(&cache, 1, (BlobSpot *)&blob2);
-  TEST_ASSERT_EQUAL(1, cache.count); /* Count shouldn't increase */
+  /* Put rowid=1 again — replaces spot1 with spot2.
+  ** spot1: cache releases old ref (2→1). spot2: cache addrefs (1→2). */
+  blob_cache_put(&cache, 1, spot2);
+  TEST_ASSERT_EQUAL(1, cache.count);     /* Count shouldn't increase */
+  TEST_ASSERT_EQUAL(1, spot1->refcount); /* Old ref released */
+  TEST_ASSERT_EQUAL(2, spot2->refcount); /* New ref taken */
 
-  /* Get should return second pointer */
+  /* Get should return second pointer (addrefs: 2→3) */
   BlobSpot *result = blob_cache_get(&cache, 1);
-  TEST_ASSERT_EQUAL_PTR(&blob2, result);
+  TEST_ASSERT_EQUAL_PTR(spot2, result);
+  blob_spot_free(result); /* Release get ref (3→2) */
 
-  blob_cache_deinit(&cache);
+  blob_cache_deinit(&cache); /* Release cache ref on spot2 (2→1) */
+
+  blob_spot_free(spot1); /* 1→0→freed */
+  blob_spot_free(spot2); /* 1→0→freed */
 }
 
 /**************************************************************************
@@ -307,106 +341,150 @@ void test_cache_large_capacity(void) {
 }
 
 /**************************************************************************
-** Test 11: Owning cache — put sets is_cached flag
+** Test 11: Cache put increments refcount
 **************************************************************************/
 
 void test_cache_owning_put_sets_flag(void) {
   BlobCache cache;
   blob_cache_init(&cache, 10);
-  cache.owns_blobs = 1; /* Enable owning mode */
 
-  /* Allocate a real BlobSpot-sized block (not a mock — we need is_cached) */
+  /* Allocate a mock BlobSpot with refcount=1 (simulates blob_spot_create) */
   BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
   TEST_ASSERT_NOT_NULL(spot);
   memset(spot, 0, sizeof(BlobSpot));
-  TEST_ASSERT_EQUAL(0, spot->is_cached);
+  spot->refcount = 1; /* Creator's reference */
+  TEST_ASSERT_EQUAL(1, spot->refcount);
 
-  /* Put into owning cache — should set is_cached */
+  /* Put into cache — should addref (refcount 1 -> 2) */
   blob_cache_put(&cache, 1, spot);
-  TEST_ASSERT_EQUAL(1, spot->is_cached);
+  TEST_ASSERT_EQUAL(2, spot->refcount);
 
+  /* Deinit releases cache's ref (refcount 2 -> 1) */
   blob_cache_deinit(&cache);
-  /* In owning mode, deinit frees BlobSpots — spot is now freed.
-   * Valgrind will verify no leaks and no double-free. */
+  TEST_ASSERT_EQUAL(1, spot->refcount);
+
+  /* Release creator's ref (refcount 1 -> 0 -> freed) */
+  blob_spot_free(spot);
 }
 
 /**************************************************************************
-** Test 12: Owning cache — eviction clears is_cached flag
+** Test 12: Cache eviction decrements refcount
 **************************************************************************/
 
 void test_cache_owning_eviction_clears_flag(void) {
   BlobCache cache;
   blob_cache_init(&cache, 3); /* Tiny capacity */
-  cache.owns_blobs = 1;
 
-  /* Allocate 4 BlobSpots */
+  /* Allocate 4 BlobSpots with refcount=1 */
   BlobSpot *spots[4];
   for (int i = 0; i < 4; i++) {
     spots[i] = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
     TEST_ASSERT_NOT_NULL(spots[i]);
     memset(spots[i], 0, sizeof(BlobSpot));
+    spots[i]->refcount = 1;
   }
 
-  /* Fill cache (capacity 3) */
+  /* Fill cache (capacity 3) — each put addrefs to 2 */
   blob_cache_put(&cache, 1, spots[0]);
   blob_cache_put(&cache, 2, spots[1]);
   blob_cache_put(&cache, 3, spots[2]);
-  TEST_ASSERT_EQUAL(1, spots[0]->is_cached);
-  TEST_ASSERT_EQUAL(1, spots[1]->is_cached);
-  TEST_ASSERT_EQUAL(1, spots[2]->is_cached);
+  TEST_ASSERT_EQUAL(2, spots[0]->refcount);
+  TEST_ASSERT_EQUAL(2, spots[1]->refcount);
+  TEST_ASSERT_EQUAL(2, spots[2]->refcount);
 
-  /* Put 4th entry — should evict LRU (rowid=1, spots[0]) */
+  /* Put 4th entry — evicts LRU (rowid=1, spots[0]).
+  ** Eviction decrefs spots[0] from 2 to 1 (creator still holds ref). */
   blob_cache_put(&cache, 4, spots[3]);
-  TEST_ASSERT_EQUAL(0, spots[0]->is_cached); /* Evicted — flag cleared */
-  TEST_ASSERT_EQUAL(1, spots[3]->is_cached); /* New entry — flag set */
+  TEST_ASSERT_EQUAL(1, spots[0]->refcount); /* Evicted, creator ref remains */
+  TEST_ASSERT_EQUAL(2, spots[3]->refcount); /* Cached */
 
-  /* Clean up: spots[0] was evicted (is_cached=0), must be freed by caller */
-  sqlite3_free(spots[0]);
-  /* spots[1], spots[2], spots[3] are in cache — deinit frees them */
+  /* Deinit releases cache refs for spots[1-3] */
   blob_cache_deinit(&cache);
+
+  /* Release creator refs */
+  blob_spot_free(spots[0]); /* refcount 1 -> 0 -> freed */
+  blob_spot_free(spots[1]); /* refcount 1 -> 0 -> freed */
+  blob_spot_free(spots[2]); /* refcount 1 -> 0 -> freed */
+  blob_spot_free(spots[3]); /* refcount 1 -> 0 -> freed */
 }
 
 /**************************************************************************
-** Test 13: Owning cache — deinit frees all remaining BlobSpots
+** Test 13: Cache deinit releases all refs
 **************************************************************************/
 
 void test_cache_owning_deinit_frees(void) {
   BlobCache cache;
   blob_cache_init(&cache, 10);
-  cache.owns_blobs = 1;
 
-  /* Allocate and insert 5 BlobSpots */
+  /* Allocate and insert 5 BlobSpots (refcount=1 each) */
+  BlobSpot *spots[5];
   for (int i = 0; i < 5; i++) {
-    BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
-    TEST_ASSERT_NOT_NULL(spot);
-    memset(spot, 0, sizeof(BlobSpot));
-    blob_cache_put(&cache, (uint64_t)(i + 1), spot);
+    spots[i] = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
+    TEST_ASSERT_NOT_NULL(spots[i]);
+    memset(spots[i], 0, sizeof(BlobSpot));
+    spots[i]->refcount = 1;
+    blob_cache_put(&cache, (uint64_t)(i + 1), spots[i]);
+    TEST_ASSERT_EQUAL(2, spots[i]->refcount);
   }
 
   TEST_ASSERT_EQUAL(5, cache.count);
 
-  /* Deinit should free all 5 BlobSpots */
+  /* Deinit releases cache refs (refcount 2 -> 1 each) */
   blob_cache_deinit(&cache);
-  /* Valgrind will verify no leaks */
+
+  /* Release creator refs (refcount 1 -> 0 -> freed) */
+  for (int i = 0; i < 5; i++) {
+    blob_spot_free(spots[i]);
+  }
 }
 
 /**************************************************************************
-** Test 14: Non-owning cache — put does NOT set is_cached flag
+** Test 14: Cache get increments refcount
 **************************************************************************/
 
 void test_cache_non_owning_no_flag(void) {
   BlobCache cache;
   blob_cache_init(&cache, 10);
-  /* owns_blobs defaults to 0 (non-owning) */
 
   BlobSpot *spot = (BlobSpot *)sqlite3_malloc(sizeof(BlobSpot));
   TEST_ASSERT_NOT_NULL(spot);
   memset(spot, 0, sizeof(BlobSpot));
+  spot->refcount = 1;
 
   blob_cache_put(&cache, 1, spot);
-  TEST_ASSERT_EQUAL(0, spot->is_cached); /* Non-owning: flag stays 0 */
+  TEST_ASSERT_EQUAL(2, spot->refcount); /* Creator + cache */
 
-  blob_cache_deinit(&cache);
-  /* Non-owning cache doesn't free BlobSpots — caller must */
-  sqlite3_free(spot);
+  /* Get addrefs (refcount 2 -> 3) */
+  BlobSpot *retrieved = blob_cache_get(&cache, 1);
+  TEST_ASSERT_EQUAL_PTR(spot, retrieved);
+  TEST_ASSERT_EQUAL(3, spot->refcount); /* Creator + cache + get */
+
+  /* Release get ref */
+  blob_spot_free(retrieved); /* 3 -> 2 */
+
+  blob_cache_deinit(&cache); /* 2 -> 1 */
+  blob_spot_free(spot);      /* 1 -> 0 -> freed */
+}
+
+/**************************************************************************
+** Test 15: Same-pointer re-insert doesn't leak refcount
+**************************************************************************/
+
+void test_cache_same_pointer_no_leak(void) {
+  BlobCache cache;
+  blob_cache_init(&cache, 10);
+
+  BlobSpot *spot = create_mock_blobspot();
+  TEST_ASSERT_NOT_NULL(spot);
+
+  /* Put rowid=1 (addrefs: 1→2) */
+  blob_cache_put(&cache, 1, spot);
+  TEST_ASSERT_EQUAL(2, spot->refcount);
+
+  /* Put same pointer for same rowid again — should NOT change refcount */
+  blob_cache_put(&cache, 1, spot);
+  TEST_ASSERT_EQUAL(2, spot->refcount); /* Still 2, not 3 */
+
+  blob_cache_deinit(&cache); /* 2 → 1 */
+  blob_spot_free(spot);      /* 1 → 0 → freed */
 }

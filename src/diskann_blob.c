@@ -82,6 +82,7 @@ int blob_spot_create(DiskAnnIndex *idx, BlobSpot **out, uint64_t rowid,
   spot->is_writable = is_writable;
   spot->is_initialized = 0;
   spot->is_aborted = 0;
+  spot->refcount = 1; /* Caller gets one reference */
 
   /* Success - transfer ownership to caller */
   *out = spot;
@@ -186,10 +187,42 @@ int blob_spot_flush(DiskAnnIndex *idx, BlobSpot *spot) {
     return DISKANN_ERROR_INVALID;
   }
 
-  /* Write buffer to BLOB */
-  int sqlite_rc = sqlite3_blob_write(spot->pBlob, spot->buffer,
-                                     (int)spot->buffer_size, 0 /* offset */
+  /* Reopen blob handle if it was closed or expired.
+  ** Handles are closed by blob_cache_release_handles() to avoid blocking
+  ** COMMIT, and expired by insert_shadow_row() which invalidates all open
+  ** handles on the shadow table. */
+  int sqlite_rc;
+  if (spot->pBlob == NULL || spot->is_aborted) {
+    /* Handle already closed or expired — must reopen */
+    if (spot->pBlob) {
+      sqlite3_blob_close(spot->pBlob);
+      spot->pBlob = NULL;
+    }
+    goto reopen;
+  }
+
+  sqlite_rc = sqlite3_blob_write(spot->pBlob, spot->buffer,
+                                 (int)spot->buffer_size, 0 /* offset */
   );
+
+  if (sqlite_rc == SQLITE_ABORT) {
+    sqlite3_blob_close(spot->pBlob);
+    spot->pBlob = NULL;
+
+  reopen:
+    sqlite_rc = sqlite3_blob_open(idx->db, idx->db_name, idx->shadow_name,
+                                  "data", (sqlite3_int64)spot->rowid,
+                                  spot->is_writable, &spot->pBlob);
+    if (sqlite_rc != SQLITE_OK) {
+      spot->is_aborted = 1;
+      return convert_sqlite_error(idx, sqlite_rc);
+    }
+    spot->is_aborted = 0;
+
+    sqlite_rc = sqlite3_blob_write(spot->pBlob, spot->buffer,
+                                   (int)spot->buffer_size, 0 /* offset */
+    );
+  }
 
   if (sqlite_rc != SQLITE_OK) {
     return DISKANN_ERROR;
@@ -200,9 +233,22 @@ int blob_spot_flush(DiskAnnIndex *idx, BlobSpot *spot) {
   return DISKANN_OK;
 }
 
+void blob_spot_addref(BlobSpot *spot) {
+  if (spot) {
+    assert(spot->refcount > 0);
+    spot->refcount++;
+  }
+}
+
 void blob_spot_free(BlobSpot *spot) {
   if (!spot) {
     return;
+  }
+
+  assert(spot->refcount > 0);
+  spot->refcount--;
+  if (spot->refcount > 0) {
+    return; /* Other references remain */
   }
 
   /* Close BLOB handle */

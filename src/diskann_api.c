@@ -478,6 +478,13 @@ void diskann_close_index(DiskAnnIndex *idx) {
     return; /* Safe to call with NULL */
   }
 
+  /* Clean up deferred edges if still active (safety net) */
+  if (idx->deferred_edges) {
+    deferred_edge_list_deinit(idx->deferred_edges);
+    sqlite3_free(idx->deferred_edges);
+    idx->deferred_edges = NULL;
+  }
+
   /* Clean up batch cache if still active */
   if (idx->batch_cache) {
     blob_cache_deinit(idx->batch_cache);
@@ -507,7 +514,7 @@ void diskann_close_index(DiskAnnIndex *idx) {
   free(idx);
 }
 
-int diskann_begin_batch(DiskAnnIndex *idx) {
+int diskann_begin_batch(DiskAnnIndex *idx, int flags) {
   if (!idx) {
     return DISKANN_ERROR_INVALID;
   }
@@ -526,9 +533,32 @@ int diskann_begin_batch(DiskAnnIndex *idx) {
     sqlite3_free(cache);
     return rc;
   }
-  cache->owns_blobs = 1; /* Cache owns BlobSpots in batch mode */
 
   idx->batch_cache = cache;
+
+  /* Allocate deferred edge list for lazy back-edges (if requested) */
+  if (flags & DISKANN_BATCH_DEFERRED_EDGES) {
+    idx->deferred_edges =
+        (DeferredEdgeList *)sqlite3_malloc(sizeof(DeferredEdgeList));
+    if (!idx->deferred_edges) {
+      blob_cache_deinit(cache);
+      sqlite3_free(cache);
+      idx->batch_cache = NULL;
+      return DISKANN_ERROR_NOMEM;
+    }
+    rc = deferred_edge_list_init(idx->deferred_edges,
+                                 DEFERRED_EDGE_LIST_DEFAULT_CAPACITY,
+                                 idx->nNodeVectorSize);
+    if (rc != DISKANN_OK) {
+      sqlite3_free(idx->deferred_edges);
+      idx->deferred_edges = NULL;
+      blob_cache_deinit(cache);
+      sqlite3_free(cache);
+      idx->batch_cache = NULL;
+      return rc;
+    }
+  }
+
   return DISKANN_OK;
 }
 
@@ -538,6 +568,39 @@ int diskann_end_batch(DiskAnnIndex *idx) {
   }
   if (idx->batch_cache == NULL) {
     return DISKANN_ERROR_INVALID; /* Not in batch mode */
+  }
+
+  int rc = DISKANN_OK;
+
+  /* Apply deferred back-edges before destroying cache */
+  if (idx->deferred_edges) {
+    rc = diskann_batch_repair_edges(idx, idx->deferred_edges);
+    deferred_edge_list_deinit(idx->deferred_edges);
+    sqlite3_free(idx->deferred_edges);
+    idx->deferred_edges = NULL;
+  }
+
+  /* Free cache (frees all owned BlobSpots in owning mode) */
+  blob_cache_deinit(idx->batch_cache);
+  sqlite3_free(idx->batch_cache);
+  idx->batch_cache = NULL;
+
+  return rc;
+}
+
+int diskann_abort_batch(DiskAnnIndex *idx) {
+  if (!idx) {
+    return DISKANN_ERROR_INVALID;
+  }
+  if (idx->batch_cache == NULL) {
+    return DISKANN_ERROR_INVALID; /* Not in batch mode */
+  }
+
+  /* Discard deferred edges WITHOUT applying (rollback path) */
+  if (idx->deferred_edges) {
+    deferred_edge_list_deinit(idx->deferred_edges);
+    sqlite3_free(idx->deferred_edges);
+    idx->deferred_edges = NULL;
   }
 
   /* Free cache (frees all owned BlobSpots in owning mode) */

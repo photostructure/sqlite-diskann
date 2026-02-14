@@ -174,13 +174,11 @@ export interface DiskAnnIndexOptions {
    *
    * **✅ RUNTIME MUTABLE** - Can be overridden per-query via SearchOptions
    *
-   * Recommended:
-   * - Fast queries: 50-100
-   * - Balanced: 100-200
-   * - High recall: 200-500
+   * The effective beam width is automatically scaled to
+   * `max(searchListSize, sqrt(indexSize))` to maintain recall as the
+   * index grows. For most workloads, the default is sufficient.
    *
-   * @default 100
-   * @example 150
+   * @default 100 (auto-scales with index size)
    * @see {@link SearchOptions.searchListSize} for per-query override
    */
   searchListSize?: number;
@@ -273,27 +271,21 @@ export interface SearchOptions {
    * **✅ RUNTIME MUTABLE** - Can be changed per-query without rebuilding
    *
    * Overrides the default searchListSize stored in index metadata.
-   * Use this to tune recall/speed tradeoff on a per-query basis.
+   * The effective beam is `max(this_value, sqrt(index_size))`, so
+   * setting a low value won't degrade recall on large indices.
    *
-   * Recommended:
-   * - Fast queries: 50-100
-   * - Balanced: 100-200
-   * - High recall: 200-500
+   * For most workloads, omit this — auto-scaling handles it.
+   * Override only when you need faster queries and can accept lower recall.
    *
-   * Rule of thumb: `searchListSize ≥ k × 2` for good recall
-   *
-   * @default Uses index's stored searchListSize (typically 100)
+   * @default Auto-scaled: `max(stored_default, sqrt(index_size))`
    *
    * @example
    * ```typescript
-   * // Use index default
+   * // Use auto-scaled default (recommended)
    * searchNearest(db, 'vectors', query, 10)
    *
-   * // Override for higher recall on this query
-   * searchNearest(db, 'vectors', query, 10, { searchListSize: 300 })
-   *
-   * // Fast query with lower recall
-   * searchNearest(db, 'vectors', query, 10, { searchListSize: 50 })
+   * // Force wider beam for maximum recall
+   * searchNearest(db, 'vectors', query, 10, { searchListSize: 500 })
    * ```
    */
   searchListSize?: number;

@@ -67,7 +67,7 @@ typedef struct DiskAnnConfig {
   uint32_t dimensions;       /* vector dimensionality (e.g., 768 for CLIP) */
   uint8_t metric;            /* DISKANN_METRIC_* */
   uint32_t max_neighbors;    /* max edges per node (default: 32) */
-  uint32_t search_list_size; /* search beam width (default: 100) */
+  uint32_t search_list_size; /* search beam width (default: 100, auto-scales) */
   uint32_t insert_list_size; /* insert beam width (default: 200) */
   uint32_t block_size;       /* node block size in bytes (default: 4096) */
 } DiskAnnConfig;
@@ -146,6 +146,11 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
 /*
 ** Search for k-nearest neighbors.
 **
+** The search beam width is automatically scaled to max(configured, sqrt(n))
+** where n is the index size. This maintains recall as the index grows without
+** manual tuning. Per-query overrides via the vtab search_list_size constraint
+** also benefit from this floor.
+**
 ** Parameters:
 **   idx     - Index handle
 **   query   - Query vector (float32 array)
@@ -193,7 +198,14 @@ int diskann_search_filtered(DiskAnnIndex *idx, const float *query,
 ** redundant BLOB I/O when nodes are visited by multiple consecutive inserts.
 **
 ** Parameters:
-**   idx - Index handle (must not be NULL, must not already be in batch mode)
+**   idx   - Index handle (must not be NULL, must not already be in batch mode)
+**   flags - Bitwise OR of DISKANN_BATCH_* flags, or 0 for cache-only mode
+**
+** Flags:
+**   DISKANN_BATCH_DEFERRED_EDGES - Enable lazy back-edges. Phase 2 back-edges
+**     are deferred and applied in a single repair pass at end_batch(). Trades
+**     small-scale recall for ~30% insert speedup. Best at 10k+ vectors.
+**     Without this flag, batch mode only provides persistent BlobCache.
 **
 ** Returns:
 **   DISKANN_OK on success
@@ -202,7 +214,8 @@ int diskann_search_filtered(DiskAnnIndex *idx, const float *query,
 **
 ** Caller must call diskann_end_batch() when done inserting.
 */
-int diskann_begin_batch(DiskAnnIndex *idx);
+#define DISKANN_BATCH_DEFERRED_EDGES 0x01
+int diskann_begin_batch(DiskAnnIndex *idx, int flags);
 
 /*
 ** End batch mode and free the persistent cache.
@@ -215,6 +228,21 @@ int diskann_begin_batch(DiskAnnIndex *idx);
 **   DISKANN_ERROR_INVALID if idx is NULL or not in batch mode
 */
 int diskann_end_batch(DiskAnnIndex *idx);
+
+/*
+** Abort batch mode, discarding deferred edges without applying.
+**
+** Used on transaction rollback — shadow table changes are being rolled back,
+** so deferred edges must NOT be applied. Frees the cache and deferred list.
+**
+** Parameters:
+**   idx - Index handle (must not be NULL, must be in batch mode)
+**
+** Returns:
+**   DISKANN_OK on success
+**   DISKANN_ERROR_INVALID if idx is NULL or not in batch mode
+*/
+int diskann_abort_batch(DiskAnnIndex *idx);
 
 /*
 ** Delete a vector from the index.

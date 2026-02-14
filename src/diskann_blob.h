@@ -39,7 +39,9 @@ typedef struct BlobSpot {
   int is_writable;      /* 1 if opened for writing, 0 for reading */
   int is_initialized;   /* 1 if buffer contains valid data */
   int is_aborted;       /* 1 if BLOB operations have been aborted */
-  int is_cached; /* 1 if owned by an owning BlobCache (do not free via node) */
+  int refcount;         /* Reference count (>0 = alive). Decremented by
+                        ** blob_spot_free(); actual free when reaching 0.
+                        ** Incremented by blob_cache_put/get. */
 } BlobSpot;
 
 /*
@@ -116,13 +118,21 @@ int blob_spot_reload(DiskAnnIndex *idx, BlobSpot *spot, uint64_t rowid,
 int blob_spot_flush(DiskAnnIndex *idx, BlobSpot *spot);
 
 /*
-** Free BlobSpot and associated resources.
+** Increment BlobSpot reference count.
 **
-** Closes the BLOB handle and frees the buffer.
-** Safe to call with NULL.
+** Called by blob_cache_put/get when the cache or a caller takes a reference.
+** Each addref must be balanced by a blob_spot_free (decref).
+*/
+void blob_spot_addref(BlobSpot *spot);
+
+/*
+** Decrement BlobSpot reference count and free when it reaches zero.
+**
+** Closes the BLOB handle and frees the buffer only when no references
+** remain. Safe to call with NULL.
 **
 ** Parameters:
-**   spot - BlobSpot to free (can be NULL)
+**   spot - BlobSpot to release (can be NULL)
 */
 void blob_spot_free(BlobSpot *spot);
 

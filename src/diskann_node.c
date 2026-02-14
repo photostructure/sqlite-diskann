@@ -271,9 +271,9 @@ void diskann_node_free(DiskAnnNode *node) {
   if (node == NULL) {
     return;
   }
-  /* Skip freeing BlobSpots owned by an owning BlobCache (is_cached=1).
-  ** The cache will free them during blob_cache_deinit(). */
-  if (node->blob_spot != NULL && !node->blob_spot->is_cached) {
+  /* Release node's reference on BlobSpot. If the cache also holds a
+  ** reference, the BlobSpot survives (refcount > 0). Otherwise freed. */
+  if (node->blob_spot != NULL) {
     blob_spot_free(node->blob_spot);
   }
   sqlite3_free(node);

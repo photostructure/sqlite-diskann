@@ -11,10 +11,8 @@
 ** Design:
 ** - Simple LRU eviction with doubly-linked list (array-based, not pointers)
 ** - Linear search for get (100 entries = ~10 cache lines, fast enough)
-** - Two ownership modes controlled by owns_blobs flag:
-**   owns_blobs=0: Non-owning (per-insert). Cache holds borrowed pointers.
-**   owns_blobs=1: Owning (batch). Cache owns BlobSpots, sets is_cached flag,
-**                 frees on eviction/deinit. Used by diskann_begin_batch().
+** - Ownership via BlobSpot refcount: cache takes a ref on put/get,
+**   releases on eviction/deinit. BlobSpot freed when refcount reaches 0.
 */
 #ifndef DISKANN_CACHE_H
 #define DISKANN_CACHE_H
@@ -31,9 +29,9 @@ extern "C" {
 **
 ** Memory ownership:
 ** - slots, rowids, next, prev: owned by cache (freed in deinit)
-** - BlobSpot instances: depends on owns_blobs flag
-**   owns_blobs=0: NOT owned (caller manages)
-**   owns_blobs=1: owned (freed on eviction and in deinit)
+** - BlobSpot instances: managed via refcount. Cache takes a ref on
+**   put/get, releases on eviction/deinit. BlobSpot freed when last
+**   ref is released (refcount reaches 0).
 **
 ** LRU implementation:
 ** - head: most recently used (MRU)
@@ -52,7 +50,6 @@ typedef struct BlobCache {
   int tail;         /* Index of LRU entry (-1 if empty) */
   int hits;         /* Cache hit counter */
   int misses;       /* Cache miss counter */
-  int owns_blobs;   /* 1 = cache owns BlobSpots (frees on evict/deinit) */
 } BlobCache;
 
 /*
@@ -97,14 +94,27 @@ BlobSpot *blob_cache_get(BlobCache *cache, uint64_t rowid);
 **   rowid - Row ID to associate with BlobSpot
 **   spot  - BlobSpot to cache (can be NULL - stores NULL pointer)
 **
-** Note: Cache does NOT take ownership of BlobSpot. Caller must free.
+** Note: Cache takes a refcount reference. Caller retains its own reference.
 */
 void blob_cache_put(BlobCache *cache, uint64_t rowid, BlobSpot *spot);
 
 /*
+** Close all blob handles in the cache, preserving buffer data.
+**
+** Used by vtab xUpdate to release blob handles so they don't block
+** COMMIT. Cached BlobSpots are marked as aborted; blob_spot_reload()
+** will reopen handles on next access.
+**
+** Parameters:
+**   cache - Cache to release handles for (NULL safe - no-op)
+*/
+void blob_cache_release_handles(BlobCache *cache);
+
+/*
 ** Free cache resources.
 **
-** Does NOT free BlobSpot instances (caller owns them).
+** Releases the cache's refcount reference on each BlobSpot.
+** BlobSpots with no remaining references are freed.
 ** Safe to call with NULL.
 **
 ** Parameters:

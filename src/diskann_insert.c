@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 /**************************************************************************
@@ -222,6 +223,7 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   int first = 0;
   int ctx_valid = 0;
   int savepoint_active = 0;
+  int deferred_save_count = 0;
 
   /* Timing instrumentation (zero cost when disabled) */
   int timing = insert_timing_enabled();
@@ -378,6 +380,7 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   }
 
   /* Phase 2: add NEW node as edge to visited nodes */
+  deferred_save_count = idx->deferred_edges ? idx->deferred_edges->count : 0;
   for (DiskAnnNode *visited = ctx.visited_list; visited != NULL;
        visited = visited->next) {
     int i_replace;
@@ -388,6 +391,20 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
     if (i_replace == -1) {
       continue;
     }
+
+    if (idx->deferred_edges &&
+        idx->deferred_edges->count < idx->deferred_edges->capacity) {
+      /* Batch mode + capacity: defer edge. On NOMEM (vector copy failed),
+      ** fall through to immediate flush path. */
+      int add_rc = deferred_edge_list_add(
+          idx->deferred_edges, (int64_t)visited->rowid, id, distance, vector);
+      if (add_rc == DISKANN_OK) {
+        continue;
+      }
+      /* NOMEM or other error — fall through to immediate path */
+    }
+
+    /* Non-batch mode OR spillover OR deferred add failed: immediate flush */
     node_bin_replace_edge(idx, visited->blob_spot, i_replace, (uint64_t)id,
                           distance, vector);
     prune_edges(idx, visited->blob_spot, i_replace);
@@ -408,10 +425,15 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
     goto out;
   }
 
-  /* In batch mode, cache the new node's BlobSpot for future inserts */
+  /* In batch mode, cache the new node's BlobSpot for future inserts.
+  ** blob_cache_put takes its own ref; our ref is freed in the out: block. */
   if (idx->batch_cache && new_blob) {
     blob_cache_put(idx->batch_cache, (uint64_t)id, new_blob);
-    new_blob = NULL; /* Cache now owns it */
+  }
+
+  /* Update cached max rowid for dynamic search list scaling */
+  if (id > idx->cached_max_rowid) {
+    idx->cached_max_rowid = id;
   }
 
   if (timing) {
@@ -421,6 +443,11 @@ int diskann_insert(DiskAnnIndex *idx, int64_t id, const float *vector,
   rc = DISKANN_OK;
 
 out:
+  /* Truncate deferred edges added by this insert on failure */
+  if (rc != DISKANN_OK && idx->deferred_edges) {
+    deferred_edge_list_truncate(idx->deferred_edges, deferred_save_count);
+  }
+
   /* Release or rollback SAVEPOINT */
   if (savepoint_active) {
     char *sp_sql;
@@ -470,6 +497,162 @@ out:
         elapsed_us(&t_phase2, &t_flush_new), elapsed_us(&t_flush_new, &t_exit),
         active_cache ? active_cache->hits : 0,
         active_cache ? active_cache->misses : 0, visited_count, phase2_flushes);
+  }
+
+  return rc;
+}
+
+/**************************************************************************
+** Deferred edge list — lazy back-edges for batch insert
+**
+** During batch mode, Phase 2 back-edges are pre-filtered and deferred
+** into this list. At diskann_end_batch(), diskann_batch_repair_edges()
+** sorts by target, loads each node once, re-checks acceptance, applies
+** edges with pruning, and flushes once per target.
+**************************************************************************/
+
+int deferred_edge_list_init(DeferredEdgeList *list, int capacity,
+                            uint32_t vector_size) {
+  if (!list || capacity <= 0 || vector_size == 0) {
+    return DISKANN_ERROR_INVALID;
+  }
+  list->edges = (DeferredEdge *)sqlite3_malloc64((sqlite3_uint64)capacity *
+                                                 sizeof(DeferredEdge));
+  if (!list->edges) {
+    return DISKANN_ERROR_NOMEM;
+  }
+  list->count = 0;
+  list->capacity = capacity;
+  list->vector_size = vector_size;
+  return DISKANN_OK;
+}
+
+int deferred_edge_list_add(DeferredEdgeList *list, int64_t target_rowid,
+                           int64_t inserted_rowid, float distance,
+                           const float *vector) {
+  if (!list || !vector) {
+    return DISKANN_ERROR_INVALID;
+  }
+  if (list->count >= list->capacity) {
+    return DISKANN_ERROR; /* At capacity — caller should spillover */
+  }
+  float *vec_copy = (float *)sqlite3_malloc((int)list->vector_size);
+  if (!vec_copy) {
+    return DISKANN_ERROR_NOMEM;
+  }
+  memcpy(vec_copy, vector, list->vector_size);
+
+  DeferredEdge *e = &list->edges[list->count];
+  e->target_rowid = target_rowid;
+  e->inserted_rowid = inserted_rowid;
+  e->distance = distance;
+  e->vector = vec_copy;
+  list->count++;
+  return DISKANN_OK;
+}
+
+void deferred_edge_list_truncate(DeferredEdgeList *list, int saved_count) {
+  if (!list || saved_count < 0 || saved_count >= list->count) {
+    return;
+  }
+  for (int i = saved_count; i < list->count; i++) {
+    if (list->edges[i].vector) {
+      sqlite3_free(list->edges[i].vector);
+      list->edges[i].vector = NULL;
+    }
+  }
+  list->count = saved_count;
+}
+
+void deferred_edge_list_deinit(DeferredEdgeList *list) {
+  if (!list) {
+    return;
+  }
+  if (list->edges) {
+    for (int i = 0; i < list->count; i++) {
+      if (list->edges[i].vector) {
+        sqlite3_free(list->edges[i].vector);
+        list->edges[i].vector = NULL;
+      }
+    }
+    sqlite3_free(list->edges);
+    list->edges = NULL;
+  }
+  list->count = 0;
+  list->capacity = 0;
+}
+
+static int cmp_target_rowid(const void *a, const void *b) {
+  const DeferredEdge *ea = (const DeferredEdge *)a;
+  const DeferredEdge *eb = (const DeferredEdge *)b;
+  if (ea->target_rowid < eb->target_rowid)
+    return -1;
+  if (ea->target_rowid > eb->target_rowid)
+    return 1;
+  return 0;
+}
+
+int diskann_batch_repair_edges(DiskAnnIndex *idx, DeferredEdgeList *list) {
+  if (!idx || !list || list->count == 0) {
+    return DISKANN_OK;
+  }
+
+  /* Sort by target_rowid for grouping */
+  qsort(list->edges, (size_t)list->count, sizeof(DeferredEdge),
+        cmp_target_rowid);
+
+  int rc = DISKANN_OK;
+  int i = 0;
+
+  while (i < list->count) {
+    int64_t target = list->edges[i].target_rowid;
+
+    /* Load target node BlobSpot (writable) — try batch cache first.
+    ** blob_cache_get addrefs, so we must always decref (blob_spot_free)
+    ** when done, regardless of source (cache or freshly created). */
+    BlobSpot *spot = NULL;
+    if (idx->batch_cache) {
+      spot = blob_cache_get(idx->batch_cache, (uint64_t)target);
+    }
+    if (spot) {
+      /* Force reload — blob handle is expired after inserts modified
+      ** the shadow table. Set is_aborted so reload closes and reopens
+      ** the handle (sqlite3_blob_read fails on expired handles). */
+      spot->is_initialized = 0;
+      spot->is_aborted = 1;
+    } else {
+      rc = blob_spot_create(idx, &spot, (uint64_t)target, idx->block_size,
+                            DISKANN_BLOB_WRITABLE);
+      if (rc != DISKANN_OK) {
+        break;
+      }
+    }
+    rc = blob_spot_reload(idx, spot, (uint64_t)target, idx->block_size);
+    if (rc != DISKANN_OK) {
+      blob_spot_free(spot); /* Release our ref (cache or create) */
+      break;
+    }
+
+    /* Apply all deferred edges to this target */
+    while (i < list->count && list->edges[i].target_rowid == target) {
+      DeferredEdge *e = &list->edges[i];
+      float dist;
+      int i_replace = replace_edge_idx(idx, spot, (uint64_t)e->inserted_rowid,
+                                       e->vector, &dist);
+      if (i_replace != -1) {
+        node_bin_replace_edge(idx, spot, i_replace, (uint64_t)e->inserted_rowid,
+                              dist, e->vector);
+        prune_edges(idx, spot, i_replace);
+      }
+      i++;
+    }
+
+    /* Single flush per target, then release our reference */
+    rc = blob_spot_flush(idx, spot);
+    blob_spot_free(spot); /* Release our ref */
+    if (rc != DISKANN_OK) {
+      break;
+    }
   }
 
   return rc;

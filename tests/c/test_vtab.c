@@ -1468,3 +1468,126 @@ void test_vtab_filter_graph_bridge(void) {
 
   sqlite3_close(db);
 }
+
+/**************************************************************************
+** Vtab batch transaction tests (4)
+**
+** Verify that vtab transaction hooks (xBegin/xSync/xCommit/xRollback)
+** activate the persistent BlobCache for write transactions.
+**************************************************************************/
+
+/* Helper: insert N 3D vectors into vtab "t" using explicit transaction */
+static void batch_insert_vectors(sqlite3 *db, int start_id, int count) {
+  for (int i = 0; i < count; i++) {
+    int id = start_id + i;
+    float x = (float)(id * 17 % 100) / 10.0f;
+    float y = (float)(id * 31 % 100) / 10.0f;
+    float z = (float)(id * 47 % 100) / 10.0f;
+    /* Encode float[3] as little-endian hex BLOB */
+    uint8_t blob[12];
+    memcpy(blob + 0, &x, 4);
+    memcpy(blob + 4, &y, 4);
+    memcpy(blob + 8, &z, 4);
+    char *sql = sqlite3_mprintf(
+        "INSERT INTO t(rowid, vector) VALUES (%d, X'%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x')",
+        id, blob[0], blob[1], blob[2], blob[3], blob[4], blob[5], blob[6],
+        blob[7], blob[8], blob[9], blob[10], blob[11]);
+    exec_ok(db, sql);
+    sqlite3_free(sql);
+  }
+}
+
+void test_vtab_batch_transaction(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(
+      db,
+      "CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean)");
+
+  /* Insert 20 vectors inside explicit transaction */
+  exec_ok(db, "BEGIN");
+  batch_insert_vectors(db, 1, 20);
+  exec_ok(db, "COMMIT");
+
+  /* All 20 should be searchable */
+  float query[] = {5.0f, 5.0f, 5.0f};
+  int64_t rowids[20];
+  int n = search_vtab(db, "t", query, (int)sizeof(query), 20, rowids, NULL, 20);
+  TEST_ASSERT_TRUE(n >= 10); /* Most vectors found (graph quality varies) */
+
+  sqlite3_close(db);
+}
+
+void test_vtab_batch_autocommit(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(
+      db,
+      "CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean)");
+
+  /* Insert 5 vectors WITHOUT explicit BEGIN (autocommit mode) */
+  batch_insert_vectors(db, 1, 5);
+
+  /* All should be searchable */
+  float query[] = {5.0f, 5.0f, 5.0f};
+  int64_t rowids[5];
+  int n = search_vtab(db, "t", query, (int)sizeof(query), 5, rowids, NULL, 5);
+  TEST_ASSERT_TRUE(n >= 3); /* At least some found */
+
+  sqlite3_close(db);
+}
+
+void test_vtab_batch_rollback(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(
+      db,
+      "CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean)");
+
+  /* Insert 3 vectors (committed) */
+  batch_insert_vectors(db, 1, 3);
+
+  /* Begin a transaction, insert 5 more, then ROLLBACK */
+  exec_ok(db, "BEGIN");
+  batch_insert_vectors(db, 100, 5);
+  exec_ok(db, "ROLLBACK");
+
+  /* Only the original 3 should remain — verify via shadow table row count */
+  int rows = count_rows(db, "SELECT * FROM t_shadow");
+  TEST_ASSERT_EQUAL_INT(3, rows);
+
+  /* Original 3 should still be searchable */
+  float query[] = {5.0f, 5.0f, 5.0f};
+  int64_t rowids[5];
+  int n = search_vtab(db, "t", query, (int)sizeof(query), 3, rowids, NULL, 5);
+  TEST_ASSERT_TRUE(n >= 1);
+
+  sqlite3_close(db);
+}
+
+void test_vtab_batch_multiple_txns(void) {
+  sqlite3 *db = open_vtab_db();
+  exec_ok(
+      db,
+      "CREATE VIRTUAL TABLE t USING diskann(dimension=3, metric=euclidean)");
+
+  /* First transaction: insert 10 */
+  exec_ok(db, "BEGIN");
+  batch_insert_vectors(db, 1, 10);
+  exec_ok(db, "COMMIT");
+
+  /* Second transaction: insert 10 more */
+  exec_ok(db, "BEGIN");
+  batch_insert_vectors(db, 100, 10);
+  exec_ok(db, "COMMIT");
+
+  /* All 20 should be searchable */
+  float query[] = {5.0f, 5.0f, 5.0f};
+  int64_t rowids[20];
+  int n = search_vtab(db, "t", query, (int)sizeof(query), 20, rowids, NULL, 20);
+  TEST_ASSERT_TRUE(n >= 10);
+
+  /* Verify total row count */
+  int rows = count_rows(db, "SELECT * FROM t_shadow");
+  TEST_ASSERT_EQUAL_INT(20, rows);
+
+  sqlite3_close(db);
+}

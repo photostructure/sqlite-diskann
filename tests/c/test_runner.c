@@ -224,6 +224,10 @@ extern void test_vtab_filter_ne(void);
 extern void test_vtab_filter_recall(void);
 extern void test_vtab_filter_graph_bridge(void);
 
+/* Dynamic search list size scaling tests */
+extern void test_effective_search_list_size_small_index(void);
+extern void test_effective_search_list_size_scales_up(void);
+
 /* Hash set tests (build speed optimization) */
 extern void test_visited_set_init(void);
 extern void test_visited_set_add_contains(void);
@@ -250,6 +254,7 @@ extern void test_cache_owning_put_sets_flag(void);
 extern void test_cache_owning_eviction_clears_flag(void);
 extern void test_cache_owning_deinit_frees(void);
 extern void test_cache_non_owning_no_flag(void);
+extern void test_cache_same_pointer_no_leak(void);
 
 /* Batch insert tests */
 extern void test_batch_begin_end(void);
@@ -260,6 +265,32 @@ extern void test_batch_end_without_begin(void);
 extern void test_batch_insert_basic(void);
 extern void test_batch_insert_recall(void);
 extern void test_batch_insert_after_end(void);
+
+/* Deferred edge list unit tests */
+extern void test_deferred_edge_list_lifecycle(void);
+extern void test_deferred_edge_list_capacity(void);
+extern void test_deferred_edge_list_truncate(void);
+extern void test_deferred_edge_list_empty_deinit(void);
+
+/* Lazy back-edges integration tests */
+extern void test_lazy_batch_insert_basic(void);
+extern void test_lazy_batch_recall_vs_nonbatch(void);
+extern void test_lazy_batch_graph_connectivity(void);
+extern void test_lazy_batch_interleaved(void);
+extern void test_lazy_batch_large(void);
+
+/* Vtab batch transaction tests */
+extern void test_vtab_batch_transaction(void);
+extern void test_vtab_batch_autocommit(void);
+extern void test_vtab_batch_rollback(void);
+extern void test_vtab_batch_multiple_txns(void);
+
+/* Lazy back-edges error handling tests */
+extern void test_lazy_batch_close_without_end(void);
+extern void test_lazy_batch_empty_repair(void);
+extern void test_lazy_batch_single_insert(void);
+extern void test_lazy_batch_spillover(void);
+extern void test_batch_cache_eviction_use_after_free(void);
 
 void setUp(void) { /* Global setup if needed */ }
 
@@ -495,6 +526,10 @@ int main(void) {
   RUN_TEST(test_vtab_filter_recall);
   RUN_TEST(test_vtab_filter_graph_bridge);
 
+  /* Dynamic search list size scaling tests */
+  RUN_TEST(test_effective_search_list_size_small_index);
+  RUN_TEST(test_effective_search_list_size_scales_up);
+
   /* Hash set tests (build speed optimization) */
   RUN_TEST(test_visited_set_init);
   RUN_TEST(test_visited_set_add_contains);
@@ -521,6 +556,7 @@ int main(void) {
   RUN_TEST(test_cache_owning_eviction_clears_flag);
   RUN_TEST(test_cache_owning_deinit_frees);
   RUN_TEST(test_cache_non_owning_no_flag);
+  RUN_TEST(test_cache_same_pointer_no_leak);
 
   /* Batch insert tests */
   RUN_TEST(test_batch_begin_end);
@@ -531,6 +567,34 @@ int main(void) {
   RUN_TEST(test_batch_insert_basic);
   RUN_TEST(test_batch_insert_recall);
   RUN_TEST(test_batch_insert_after_end);
+
+  /* Deferred edge list unit tests */
+  RUN_TEST(test_deferred_edge_list_lifecycle);
+  RUN_TEST(test_deferred_edge_list_capacity);
+  RUN_TEST(test_deferred_edge_list_truncate);
+  RUN_TEST(test_deferred_edge_list_empty_deinit);
+
+  /* Lazy back-edges integration tests */
+  RUN_TEST(test_lazy_batch_insert_basic);
+  RUN_TEST(test_lazy_batch_recall_vs_nonbatch);
+  RUN_TEST(test_lazy_batch_graph_connectivity);
+  RUN_TEST(test_lazy_batch_interleaved);
+  RUN_TEST(test_lazy_batch_large);
+
+  /* Vtab batch transaction tests */
+  RUN_TEST(test_vtab_batch_transaction);
+  RUN_TEST(test_vtab_batch_autocommit);
+  RUN_TEST(test_vtab_batch_rollback);
+  RUN_TEST(test_vtab_batch_multiple_txns);
+
+  /* Lazy back-edges error handling tests */
+  RUN_TEST(test_lazy_batch_close_without_end);
+  RUN_TEST(test_lazy_batch_empty_repair);
+  RUN_TEST(test_lazy_batch_single_insert);
+  RUN_TEST(test_lazy_batch_spillover);
+
+  /* Cache eviction regression test */
+  RUN_TEST(test_batch_cache_eviction_use_after_free);
 
   return UNITY_END();
 }
