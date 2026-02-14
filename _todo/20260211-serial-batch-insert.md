@@ -95,7 +95,7 @@ Based on profiling (10k scale, 189 inserts/sec baseline):
 - [x] **Phase 1a: Persistent BlobCache across batch** — 0% cache hits on ~130 visited nodes/insert. Expected -10-20% total time. Medium effort.
 - [ ] Phase 1b: Prepared statement caching for `insert_shadow_row()` — minor optimization, low effort
 - [ ] ~~Phase 1c: Transaction batching~~ — SKIPPED, SAVEPOINT = 0.02% of insert time
-- [ ] **Phase 2: Lazy back-edges + batch repair** — 31% of insert time. Expected -30% total time. High effort/complexity.
+- [ ] **Phase 2: Lazy back-edges + batch repair** — 31% of insert time. Expected -30% total time. High effort/complexity. Sub-TPP: `_todo/20260212-lazy-back-edges.md` (validated, Research & Planning complete)
 - [ ] Phase 3: Intra-batch candidates — deferred until Phase 1+2 measured
 - [ ] Benchmark: 500-vector batch into 10k index, compare serial vs batch
 - [ ] Validate recall >= 85% for batch inserts
