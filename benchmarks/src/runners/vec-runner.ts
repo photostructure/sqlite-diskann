@@ -5,8 +5,8 @@
  * MIT License (see LICENSE file)
  */
 
+import { load as loadSqliteVec } from "@photostructure/sqlite-vec";
 import { DatabaseSync } from "node:sqlite";
-import { load as loadSqliteVec } from "sqlite-vec";
 import type { BenchmarkConfig } from "../config.js";
 import { Timer } from "../utils/timer.js";
 import { BenchmarkRunner, type BuildResult, type SearchResult } from "./base.js";

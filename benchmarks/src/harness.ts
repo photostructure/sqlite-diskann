@@ -16,6 +16,7 @@ import {
 } from "./param-sweep.js";
 import type { BenchmarkRunner } from "./runners/base.js";
 import { DiskAnnRunner } from "./runners/diskann-runner.js";
+import { USearchRunner } from "./runners/usearch-runner.js";
 import { VecRunner } from "./runners/vec-runner.js";
 
 /**
@@ -24,12 +25,14 @@ import { VecRunner } from "./runners/vec-runner.js";
  * @param name - Library name
  * @returns Benchmark runner instance
  */
-function createRunner(name: "diskann" | "vec"): BenchmarkRunner {
+function createRunner(name: "diskann" | "vec" | "usearch"): BenchmarkRunner {
   switch (name) {
     case "diskann":
       return new DiskAnnRunner();
     case "vec":
       return new VecRunner();
+    case "usearch":
+      return new USearchRunner();
     default:
       throw new Error(`Unknown library: ${name}`);
   }
@@ -145,7 +148,7 @@ export async function runBenchmark(
               if (i === 0 && k === 10) {
                 console.log(`\n[DEBUG] Query 0, k=${k}:`);
                 console.log(`  Ground truth IDs:`, gtIds.slice(0, 10));
-                console.log(`  DiskANN IDs:`, ids.slice(0, 10));
+                console.log(`  ${runner.name} IDs:`, ids.slice(0, 10));
                 console.log(`  Recall:`, recall);
               }
             }

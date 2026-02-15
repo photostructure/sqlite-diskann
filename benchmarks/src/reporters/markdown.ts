@@ -38,36 +38,40 @@ export function generateMarkdownReport(results: BenchmarkResult[]): string {
   md += "\n## Key Findings\n\n";
 
   const vecResult = results.find((r) => r.library === "sqlite-vec");
-  const diskannResult = results.find((r) => r.library === "sqlite-diskann");
+  const annResults = results.filter((r) => r.library !== "sqlite-vec");
 
-  if (vecResult && diskannResult) {
-    const speedup = diskannResult.search[0].qps / vecResult.search[0].qps;
-    const diskannRecall = diskannResult.search[0].recall;
-
-    md += `- **DiskANN is ${speedup.toFixed(1)}x faster** than brute-force sqlite-vec\n`;
-
-    if (diskannRecall !== undefined) {
-      md += `- DiskANN achieves **${(diskannRecall * 100).toFixed(1)}% recall** (trades ${((1 - diskannRecall) * 100).toFixed(1)}% accuracy for ${speedup.toFixed(0)}x speedup)\n`;
-    }
-
+  if (vecResult && annResults.length > 0) {
     md += `- sqlite-vec provides **100% recall** (exact search, guaranteed correct results)\n`;
+
+    for (const annResult of annResults) {
+      const speedup = annResult.search[0].qps / vecResult.search[0].qps;
+      const recall = annResult.search[0].recall;
+
+      md += `- **${annResult.library} is ${speedup.toFixed(1)}x faster** than brute-force sqlite-vec\n`;
+      if (recall !== undefined) {
+        md += `  - Achieves **${(recall * 100).toFixed(1)}% recall** (trades ${((1 - recall) * 100).toFixed(1)}% accuracy for ${speedup.toFixed(0)}x speedup)\n`;
+      }
+    }
   }
 
   md += "\n## Performance Characteristics\n\n";
   md += "### sqlite-vec (Brute Force)\n\n";
-  md += "- ✅ Always 100% recall (exact search)\n";
-  md += "- ✅ Simple, no parameters to tune\n";
-  md += "- ✅ Fast for small datasets (< 10k vectors)\n";
-  md += "- ❌ Linear O(n) search time\n";
-  md += "- ❌ Doesn't scale to large datasets\n\n";
+  md += "- Always 100% recall (exact search)\n";
+  md += "- Simple, no parameters to tune\n";
+  md += "- Fast for small datasets (< 10k vectors)\n";
+  md += "- Linear O(n) search time, doesn't scale to large datasets\n\n";
 
-  md += "### sqlite-diskann (Approximate)\n\n";
-  md += "- ✅ Scales to millions of vectors\n";
-  md += "- ✅ Sub-linear search time\n";
-  md += "- ✅ Disk-based (doesn't require all data in RAM)\n";
-  md += "- ❌ 95-99% recall (approximate, not exact)\n";
-  md += "- ❌ More parameters to tune\n";
-  md += "- ❌ Longer build time\n\n";
+  md += "### sqlite-diskann (DiskANN)\n\n";
+  md += "- Scales to millions of vectors\n";
+  md += "- Sub-linear search time\n";
+  md += "- Disk-based (doesn't require all data in RAM)\n";
+  md += "- 95-99% recall (approximate, not exact)\n\n";
+
+  md += "### usearch (HNSW)\n\n";
+  md += "- In-memory HNSW with SIMD-accelerated distance computation\n";
+  md += "- Sub-linear search time\n";
+  md += "- Tunable connectivity and expansion parameters\n";
+  md += "- Requires all data in RAM\n\n";
 
   return md;
 }

@@ -90,31 +90,39 @@ export function printResults(results: BenchmarkResult[]): void {
   console.log("=== Key Insights ===\n");
 
   const vecResult = results.find((r) => r.library === "sqlite-vec");
-  const diskannResult = results.find((r) => r.library === "sqlite-diskann");
+  const annResults = results.filter((r) => r.library !== "sqlite-vec");
 
-  if (vecResult && diskannResult) {
+  if (vecResult && annResults.length > 0) {
     const vecQps = vecResult.search[0].qps;
-    const diskannQps = diskannResult.search[0].qps;
-    const speedup = diskannQps / vecQps;
-    const diskannRecall = diskannResult.search[0].recall;
-
-    console.log(`- DiskANN is ${speedup.toFixed(1)}x faster than brute-force`);
-
-    if (diskannRecall !== undefined) {
-      console.log(
-        `- DiskANN recall: ${(diskannRecall * 100).toFixed(1)}% (trades ${((1 - diskannRecall) * 100).toFixed(1)}% recall for ${speedup.toFixed(0)}x speedup)`
-      );
-    }
-
     console.log(`- sqlite-vec is always 100% recall (exact search)`);
 
-    if (speedup > 100) {
-      console.log(`\n✨ DiskANN provides significant speedup for this dataset size`);
-    } else if (speedup > 10) {
-      console.log(`\n✓ DiskANN provides good speedup for this dataset size`);
+    for (const annResult of annResults) {
+      const annQps = annResult.search[0].qps;
+      const speedup = annQps / vecQps;
+      const recall = annResult.search[0].recall;
+
+      console.log(
+        `- ${annResult.library} is ${speedup.toFixed(1)}x faster than brute-force`
+      );
+      if (recall !== undefined) {
+        console.log(
+          `  Recall: ${(recall * 100).toFixed(1)}% (trades ${((1 - recall) * 100).toFixed(1)}% recall for ${speedup.toFixed(0)}x speedup)`
+        );
+      }
+    }
+
+    const bestAnn = annResults.reduce((best, r) =>
+      r.search[0].qps > best.search[0].qps ? r : best
+    );
+    const bestSpeedup = bestAnn.search[0].qps / vecQps;
+
+    if (bestSpeedup > 100) {
+      console.log(`\nSignificant speedup achieved for this dataset size`);
+    } else if (bestSpeedup > 10) {
+      console.log(`\nGood speedup achieved for this dataset size`);
     } else {
       console.log(
-        `\nℹ For small datasets, the overhead of approximate search may not be worth it`
+        `\nFor small datasets, the overhead of approximate search may not be worth it`
       );
     }
   }

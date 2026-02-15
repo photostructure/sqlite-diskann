@@ -33,7 +33,7 @@ export interface BenchmarkConfig {
   /** Libraries to benchmark */
   libraries: Array<{
     /** Library name */
-    name: "diskann" | "vec";
+    name: "diskann" | "vec" | "usearch";
     /** Library-specific parameters */
     params?: Record<string, unknown>;
   }>;
@@ -50,6 +50,18 @@ export interface BenchmarkConfig {
     metric: "cosine" | "euclidean" | "dot";
     /** Normalize vectors during insertion */
     normalizeVectors?: boolean;
+  };
+
+  /** USearch (HNSW) configuration */
+  usearch?: {
+    /** HNSW connectivity parameter (M), default 16 */
+    connectivity: number;
+    /** Expansion factor during index construction (ef_construction), default 128 */
+    expansionAdd: number;
+    /** Expansion factor during search (ef), default 64 */
+    expansionSearch: number;
+    /** Distance metric */
+    metric: "cosine" | "euclidean" | "dot";
   };
 
   /** sqlite-vec-specific configuration */

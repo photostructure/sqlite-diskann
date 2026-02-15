@@ -5,9 +5,9 @@
  * MIT License (see LICENSE file)
  */
 
+import { load as loadSqliteVec } from "@photostructure/sqlite-vec";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { load as loadSqliteVec } from "sqlite-vec";
 
 /**
  * Ground truth nearest neighbors
