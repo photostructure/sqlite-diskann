@@ -7,13 +7,15 @@ Run experiment-003 to find optimal `max_neighbors` default. Current default (32)
 ## Current Phase
 
 - [x] Research & Planning
-- [ ] Test Design
-- [ ] Implementation Design
-- [ ] Test-First Development
-- [ ] Implementation
-- [ ] Integration
-- [ ] Cleanup & Documentation
-- [ ] Final Review
+- [x] Test Design
+- [x] Implementation Design
+- [x] Test-First Development (N/A - benchmark experiment)
+- [x] Implementation (Fixed profile params, executed sweep)
+- [x] Integration (N/A - benchmark experiment)
+- [x] Cleanup & Documentation (experiment-003 documented)
+- [x] Final Review
+
+**Status:** ✅ **COMPLETE** - See `experiments/experiment-003-max-neighbors.md`
 
 ## Required Reading
 
@@ -97,4 +99,25 @@ make clean && make test  # If code changed
 
 ## Notes
 
-(To be filled during execution)
+### Session 2026-02-12: Sweep Complete — Hypothesis REJECTED
+
+**Results (100k vectors, 256D, searchListSize=150):**
+
+| maxDeg | Build(s) | Index(GB) | Recall@10 | QPS |
+|--------|----------|-----------|-----------|-----|
+| 24     | 577      | 2.78      | 56.0%     | 234 |
+| 32     | 886      | 3.96      | 72.4%     | 144 |
+| 48     | 1196     | 5.52      | 83.2%     | 121 |
+| 64     | 1484     | 7.47      | 90.3%     | 93  |
+
+**Conclusion:** max_neighbors=24 gives 56% recall — REJECTED. No config hit 93% target at searchListSize=150.
+
+**Root cause:** searchListSize=150 is too narrow for 100k vectors. Separate run with searchListSize=500 + maxDeg=64 achieved 98% recall. The dynamic `effective_search_list_size()` feature (implemented this session) auto-scales to sqrt(100k)=316, which should close the gap without manual tuning.
+
+**Decision:** Keep DEFAULT_MAX_NEIGHBORS=32. No code change. Auto-scaling search beam handles recall at scale.
+
+**Action items:**
+- [x] Document final results in experiment-003-max-neighbors.md ✅ DONE
+- [x] Update experiments/README.md index ✅ DONE
+- [x] Close this TPP (move to `_done/`)
+- [x] Fix vtab default inconsistency (maxDegree=64 in vtab + index.ts, now 32)

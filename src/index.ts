@@ -163,7 +163,7 @@ export function createDiskAnnIndex(
   const {
     dimension,
     metric = "cosine",
-    maxDegree = 64,
+    maxDegree = 32,
     buildSearchListSize = 100,
     normalizeVectors = false,
     metadataColumns = [],

@@ -358,7 +358,7 @@ static int diskannCreate(sqlite3 *db, void *pAux, int argc,
   /* Default configuration */
   config.dimensions = 0; /* Required */
   config.metric = DISKANN_METRIC_COSINE;
-  config.max_neighbors = 64;
+  config.max_neighbors = 32;
   config.search_list_size = 100;
   config.insert_list_size = 200;
   config.block_size =
