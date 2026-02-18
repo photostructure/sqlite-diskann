@@ -104,7 +104,7 @@ make clean && make test  # If code changed
 **Results (100k vectors, 256D, searchListSize=150):**
 
 | maxDeg | Build(s) | Index(GB) | Recall@10 | QPS |
-|--------|----------|-----------|-----------|-----|
+| ------ | -------- | --------- | --------- | --- |
 | 24     | 577      | 2.78      | 56.0%     | 234 |
 | 32     | 886      | 3.96      | 72.4%     | 144 |
 | 48     | 1196     | 5.52      | 83.2%     | 121 |
@@ -117,6 +117,7 @@ make clean && make test  # If code changed
 **Decision:** Keep DEFAULT_MAX_NEIGHBORS=32. No code change. Auto-scaling search beam handles recall at scale.
 
 **Action items:**
+
 - [x] Document final results in experiment-003-max-neighbors.md ✅ DONE
 - [x] Update experiments/README.md index ✅ DONE
 - [x] Close this TPP (move to `_done/`)
