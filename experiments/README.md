@@ -55,12 +55,13 @@ What the results mean. Surprises? Confirmations?
 
 ## Experiment Index
 
-| ID  | Date       | Title                                | Status   | Key Finding                              |
-| --- | ---------- | ------------------------------------ | -------- | ---------------------------------------- |
-| 001 | 2026-02-11 | Cache + Hash Set Optimization        | Complete | 37% build speedup from BLOB caching      |
-| 002 | 2026-02-11 | insert_list_size Reduction (200→100) | Complete | Only 2% improvement due to cache masking |
-| 003 | 2026-02-12 | Block Size Impact on Index Bloat     | Planned  | Test max_neighbors [24,32,48,64]         |
-| 004 | 2026-02-12 | Scaling Test (10k→200k)              | Planned  | Find crossover vs brute-force            |
+| ID  | Date       | Title                                | Status   | Key Finding                                |
+| --- | ---------- | ------------------------------------ | -------- | ------------------------------------------ |
+| 001 | 2026-02-11 | Cache + Hash Set Optimization        | Complete | 37% build speedup from BLOB caching        |
+| 002 | 2026-02-11 | insert_list_size Reduction (200→100) | Complete | Only 2% improvement due to cache masking   |
+| 003 | 2026-02-14 | max_neighbors Impact on Recall       | Complete | searchListSize bottleneck; keep default=32 |
+| 004 | 2026-02-12 | Scaling Test (10k→200k)              | Planned  | Find crossover vs brute-force              |
+| 005 | 2026-02-12 | Block Size Fix at 100k               | Complete | 98% recall (maxDeg=64), 64% (maxDeg=32)    |
 
 ## Quick Start
 
