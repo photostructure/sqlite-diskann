@@ -52,16 +52,16 @@ export interface BenchmarkConfig {
     normalizeVectors?: boolean;
   };
 
-  /** USearch (HNSW) configuration */
+  /** USearch (HNSW) configuration. Pass 0 or omit to let USearch auto-detect. */
   usearch?: {
-    /** HNSW connectivity parameter (M), default 16 */
-    connectivity: number;
-    /** Expansion factor during index construction (ef_construction), default 128 */
-    expansionAdd: number;
-    /** Expansion factor during search (ef), default 64 */
-    expansionSearch: number;
+    /** HNSW connectivity parameter (M). 0 = auto-detect. */
+    connectivity?: number;
+    /** Expansion factor during index construction (ef_construction). 0 = auto-detect. */
+    expansionAdd?: number;
+    /** Expansion factor during search (ef). 0 = auto-detect, but always >= 2*max(k). */
+    expansionSearch?: number;
     /** Distance metric */
-    metric: "cosine" | "euclidean" | "dot";
+    metric?: "cosine" | "euclidean" | "dot";
   };
 
   /** sqlite-vec-specific configuration */

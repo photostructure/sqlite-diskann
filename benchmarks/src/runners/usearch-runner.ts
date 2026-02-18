@@ -47,12 +47,15 @@ export class USearchRunner extends BenchmarkRunner {
     const timer = new Timer();
     timer.start();
 
-    const connectivity = this.config.usearch?.connectivity ?? 16;
-    const expansionAdd = this.config.usearch?.expansionAdd ?? 128;
-    const expansionSearch = this.config.usearch?.expansionSearch ?? 64;
-    const metricName =
-      this.config.usearch?.metric ?? this.config.diskann?.metric ?? "euclidean";
+    const connectivity = this.config.usearch?.connectivity ?? 32;
+    const expansionAdd = this.config.usearch?.expansionAdd ?? 512;
+    const expansionSearch = this.config.usearch?.expansionSearch ?? 512;
+    const metricName = this.config.usearch?.metric ?? "euclidean";
     const metric = mapMetric(metricName);
+
+    // Ensure expansion_search >= 5*max(k) — high-D data needs wider beam
+    const maxK = Math.max(...this.config.queries.k);
+    const effectiveExpansionSearch = Math.max(expansionSearch, maxK * 5);
 
     this.index = new Index({
       dimensions: dim,
@@ -60,9 +63,15 @@ export class USearchRunner extends BenchmarkRunner {
       quantization: ScalarKind.F32,
       connectivity,
       expansion_add: expansionAdd,
-      expansion_search: expansionSearch,
+      expansion_search: effectiveExpansionSearch,
       multi: false,
     });
+
+    console.log(
+      `  USearch params: M=${this.index.connectivity()}, ` +
+        `ef_construction=${expansionAdd}, ` +
+        `ef_search=${effectiveExpansionSearch}`
+    );
 
     // Insert vectors one at a time with 0-based keys (single-threaded)
     const count = vectors.length / dim;

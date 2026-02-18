@@ -12,15 +12,11 @@
       "name": "vec"
     },
     {
-      "name": "diskann"
+      "name": "usearch"
     }
   ],
-  "diskann": {
-    "maxDegree": [64],
-    "buildSearchListSize": [100],
-    "searchListSize": [100],
-    "metric": "euclidean",
-    "normalizeVectors": false
+  "usearch": {
+    "metric": "euclidean"
   },
   "metrics": {
     "computeRecall": true,

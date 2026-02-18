@@ -1,19 +1,22 @@
 {
-  "name": "Parameter Sweep: max_neighbors",
+  "name": "Scaling Test: 10k vectors",
   "dataset": {
-    "path": "datasets/synthetic/medium-256d-100k.bin"
+    "path": "datasets/synthetic/small-64d-10k.bin"
   },
   "queries": {
     "count": 100,
-    "k": [1, 10, 50, 100]
+    "k": [10]
   },
   "libraries": [
     {
       "name": "diskann"
+    },
+    {
+      "name": "vec"
     }
   ],
   "diskann": {
-    "maxDegree": [24, 32, 48, 64],
+    "maxDegree": [32],
     "buildSearchListSize": [100],
     "searchListSize": [150],
     "metric": "euclidean",
@@ -23,6 +26,6 @@
     "computeRecall": true,
     "measureMemory": false,
     "warmupQueries": 10,
-    "groundTruthPath": "datasets/ground-truth/medium-256d-100k.json"
+    "groundTruthPath": "datasets/ground-truth/small-64d-10k.json"
   }
 }

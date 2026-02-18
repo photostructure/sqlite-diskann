@@ -1,22 +1,25 @@
 {
-  "name": "Parameter Sweep: insert_list_size",
+  "name": "Scaling Test: 100k vectors",
   "dataset": {
     "path": "datasets/synthetic/medium-256d-100k.bin"
   },
   "queries": {
     "count": 100,
-    "k": [1, 10, 50, 100]
+    "k": [10]
   },
   "libraries": [
     {
       "name": "diskann"
+    },
+    {
+      "name": "vec"
     }
   ],
   "diskann": {
     "maxDegree": [32],
-    "buildSearchListSize": [50, 75, 100, 150, 200],
-    "searchListSize": [100],
-    "metric": "cosine",
+    "buildSearchListSize": [100],
+    "searchListSize": [150],
+    "metric": "euclidean",
     "normalizeVectors": false
   },
   "metrics": {
