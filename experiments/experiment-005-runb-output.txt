@@ -1,0 +1,99 @@
+
+> sqlite-diskann-benchmarks@0.1.0 bench
+> tsx scripts/run-benchmark.ts profiles/scaling-100k.json
+
+
+Loading benchmark profile: profiles/scaling-100k.json
+
+Benchmark: Scaling Test: 100k vectors
+
+
+=== Loading dataset: datasets/synthetic/medium-256d-100k.bin ===
+
+Loaded 100000 vectors (256d)
+
+Computing ground truth for 100 queries (k=10)...
+Ground truth cache stale (queries: 200 vs 100, cached k: 100 vs requested k: 10), recomputing...
+Ground truth ready
+
+
+=== Benchmarking diskann (maxDeg=32, buildL=100, searchL=150) ===
+
+Building index...
+  Build time: 821.3s, Index size: 3955.2 MB
+
+Warming up with 10 queries...
+Warmup complete
+
+Running searches (k=10)...
+
+[DEBUG] Query 0, k=10:
+  Ground truth IDs: [
+     58, 57033, 74150,
+  60514, 23259, 27230,
+  57523,  6006, 28162,
+  18414
+]
+  DiskANN IDs: [
+     58, 57033, 74150,
+  60514, 23259, 27230,
+  57523,  6006, 18414,
+  65627
+]
+  Recall: 0.9
+  QPS: 384, p50: 2.57ms, Recall: 63.9%
+
+
+=== Benchmarking vec ===
+
+Building index...
+  Build time: 1.5s, Index size: 100.3 MB
+
+Warming up with 10 queries...
+Warmup complete
+
+Running searches (k=10)...
+
+[DEBUG] Query 0, k=10:
+  Ground truth IDs: [
+     58, 57033, 74150,
+  60514, 23259, 27230,
+  57523,  6006, 28162,
+  18414
+]
+  DiskANN IDs: [
+     58, 57033, 74150,
+  60514, 23259, 27230,
+  57523,  6006, 28162,
+  18414
+]
+  Recall: 1
+  QPS: 49, p50: 20.36ms, Recall: 100.0%
+
+
+
+=== Benchmark Results ===
+
+Scaling Test: 100k vectors-k10
+
+[90m┌──────────────────[39m[90m┬────────────[39m[90m┬────────────[39m[90m┬──────────[39m[90m┬──────────[39m[90m┬──────────[39m[90m┬──────────[39m[90m┬────────────┐[39m
+[90m│[39m[36m Library          [39m[90m│[39m[36m Build (s)  [39m[90m│[39m[36m Index (MB) [39m[90m│[39m[36m QPS      [39m[90m│[39m[36m p50 (ms) [39m[90m│[39m[36m p95 (ms) [39m[90m│[39m[36m p99 (ms) [39m[90m│[39m[36m Recall@k   [39m[90m│[39m
+[90m├──────────────────[39m[90m┼────────────[39m[90m┼────────────[39m[90m┼──────────[39m[90m┼──────────[39m[90m┼──────────[39m[90m┼──────────[39m[90m┼────────────┤[39m
+[90m│[39m sqlite-diskann   [90m│[39m 821.3      [90m│[39m 3955.2     [90m│[39m 384      [90m│[39m 2.57     [90m│[39m 2.86     [90m│[39m 3.29     [90m│[39m 63.9%      [90m│[39m
+[90m├──────────────────[39m[90m┼────────────[39m[90m┼────────────[39m[90m┼──────────[39m[90m┼──────────[39m[90m┼──────────[39m[90m┼──────────[39m[90m┼────────────┤[39m
+[90m│[39m sqlite-vec       [90m│[39m 1.5        [90m│[39m 100.3      [90m│[39m 49       [90m│[39m 20.36    [90m│[39m 21.20    [90m│[39m 21.36    [90m│[39m 100.0%     [90m│[39m
+[90m└──────────────────[39m[90m┴────────────[39m[90m┴────────────[39m[90m┴──────────[39m[90m┴──────────[39m[90m┴──────────[39m[90m┴──────────[39m[90m┴────────────┘[39m
+
+=== Key Insights ===
+
+- DiskANN is 7.8x faster than brute-force
+- DiskANN recall: 63.9% (trades 36.1% recall for 8x speedup)
+- sqlite-vec is always 100% recall (exact search)
+
+ℹ For small datasets, the overhead of approximate search may not be worth it
+
+
+Results exported to results-2026-02-14T05-31-09-651Z.json
+
+(node:2448630) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
