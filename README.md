@@ -1,29 +1,14 @@
 # sqlite-diskann
 
-[![npm version](https://img.shields.io/npm/v/@photostructure/sqlite-diskann.svg)](https://www.npmjs.com/package/@photostructure/sqlite-diskann)
-[![CI](https://github.com/photostructure/sqlite-diskann/workflows/CI/badge.svg)](https://github.com/photostructure/sqlite-diskann/actions/workflows/ci.yml)
-[![API Docs](https://img.shields.io/badge/API-Documentation-blue)](https://photostructure.github.io/sqlite-diskann/)
+> **This project is archived.** We extracted [libSQL's DiskANN implementation](https://github.com/tursodatabase/libsql) into a standalone SQLite extension and spent a week optimizing it, but the results weren't competitive. DiskANN assumes cheap memory-mapped graph traversal; SQLite's BLOB I/O adds substantial overhead per hop, making build times and index sizes impractical — even on clustered (GMM) vectors designed to favor graph indexes.
+>
+> **Use [@photostructure/sqlite-vec](https://github.com/photostructure/sqlite-vec) instead.** For datasets under 100k, brute-force search builds nearly instantly with perfect recall. For larger datasets, [USearch](https://github.com/unum-cloud/usearch) provides 5x the QPS with 99.6% recall.
+>
+> The code and [experiments](./experiments/) are preserved here as a reference. See [What went wrong](#what-went-wrong) below for the full story.
+
+---
 
 SQLite extension for DiskANN approximate nearest neighbor vector search.
-
-## What is this?
-
-A standalone SQLite extension implementing the [DiskANN algorithm](https://github.com/microsoft/DiskANN) for efficient vector similarity search at scale. Extracted from [libSQL's implementation](https://github.com/tursodatabase/libsql) and optimized for use as a standard SQLite extension.
-
-**This repo is packaged for Node.js projects**--the releases include pre-built native binaries and TypeScript bindings.
-
-However, the underlying C extension can be compiled and used from other languages (Python, Ruby, Go, etc.) — see [Building from Source](#building-from-source) for the C API. Contributions for other language bindings are welcome.
-
-**Key features:**
-
-- Scales to millions of vectors
-- Disk-based index using SQLite's BLOB I/O (4KB blocks)
-- No separate files — entire index lives in SQLite database
-- Full transactional consistency with SQLite SAVEPOINT/WAL
-- Incremental insert/delete support
-- Cross-platform: Linux, macOS, Windows (x64, arm64)
-
-**For smaller datasets** (< 100k vectors), consider [@photostructure/sqlite-vec](https://github.com/photostructure/sqlite-vec) which uses exact brute-force search and requires no index building.
 
 ## Database Compatibility
 
@@ -179,6 +164,31 @@ make asan        # AddressSanitizer
 make valgrind    # Memory leak detection
 npm test         # TypeScript tests
 ```
+
+## What went wrong
+
+We extracted libSQL's DiskANN into a standalone SQLite extension (Feb 2026). The code worked, but benchmarks told a different story.
+
+**Recall collapsed at scale.** At 10k vectors, recall was 97%. At 100k, it dropped to near zero. The default 4KB BLOB block size only fits 2–3 edges per node for 256-dimensional vectors. The graph fragmented into disconnected components and search couldn't find its way.
+
+**Fixing recall created new problems.** Auto-calculated 40KB blocks restored recall to 98%, but meant 7.5 GB indexes for 100k vectors and build times over an hour.
+
+**We tried to optimize.** Persistent BLOB caching with refcounting (37% faster builds), batch insert API with amortized SAVEPOINT overhead, lazy back-edge deferral, and extensive parameter sweeps across `max_neighbors` and `search_list_size`. Each helped incrementally, but none addressed the fundamental issue.
+
+**The problem is architectural.** DiskANN is designed for direct memory access: mmap the graph and traverse it cheaply. SQLite's BLOB I/O adds a read per graph hop. Each insert touches ~200 nodes, so at 100k inserts the cumulative I/O is enormous. No amount of caching fixes that mismatch.
+
+**Clustered data didn't help.** We tested with GMM vectors (40 clusters, realistic for CLIP/FaceNet embeddings) hoping cluster structure would favor the graph index. It made things worse — recall dropped from 97% to 17% at 10k/512D. USearch (HNSW) handles the same data with 99.6% recall.
+
+| Metric                 | sqlite-diskann | sqlite-vec | USearch (HNSW) |
+| ---------------------- | -------------- | ---------- | -------------- |
+| Build time (10k, 512D) | 147s           | 0.1s       | 0.3s           |
+| Index size             | 747 MB         | 20 MB      | 22 MB          |
+| QPS                    | 480            | 237        | 1,188          |
+| Recall@10              | 17%            | 100%       | 99.6%          |
+
+The full optimization journey is documented in [`_todo/`](./_todo/), [`_done/`](./_done/), and [`experiments/`](./experiments/).
+
+**Are we wrong?** We'd genuinely like to know if there's a fundamental mistake in our code or our approach to testing. If you see something we missed, please email [this repo name]`@photostructure.com` and we'll take a look.
 
 ## License
 
