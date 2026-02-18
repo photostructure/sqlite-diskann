@@ -297,14 +297,17 @@ int diskann_search_ctx_init(DiskAnnSearchCtx *ctx, const float *query,
   ctx->filter_fn = NULL;
   ctx->filter_ctx = NULL;
 
-  /* Initialize hash set for O(1) visited checks
-   * Capacity = next power-of-2 >= max_candidates * 1.3 (30% margin for hash
-   * collisions) Minimum capacity = 256
+  /* Initialize hash set for O(1) visited checks.
+   *
+   * During beam search, each visited candidate explores all its neighbors
+   * (~max_degree edges), so the total number of unique visited nodes can
+   * reach max_candidates * max_degree. Using 8x max_candidates as a
+   * practical upper bound, plus load factor headroom for open addressing.
    */
-  int required_capacity = (int)((float)max_candidates * 1.3f);
+  int required_capacity = max_candidates * 8;
   int capacity = next_power_of_2(required_capacity);
-  if (capacity < 256)
-    capacity = 256;
+  if (capacity < 1024)
+    capacity = 1024;
   visited_set_init(&ctx->visited_set, capacity);
 
   ctx->distances = (float *)sqlite3_malloc(max_candidates * (int)sizeof(float));
